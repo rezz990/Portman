@@ -21,7 +21,7 @@ jobs:
         run: python tests/integration.py zig-out/bin/portman-cli.exe
       - if: runner.os == 'Windows'
         run: python scripts/build_windows.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: portman-${{ runner.os }}
           path: |
