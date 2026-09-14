@@ -15,13 +15,16 @@
 #define TRAYMSG (WM_APP+1)
 enum { ID_LIST=100, ID_ADD, ID_EDIT, ID_REMOVE, ID_IMPORT, ID_START, ID_STOP,
  ID_RESTART, ID_STARTALL, ID_STOPALL, ID_BROWSER, ID_FOLDER, ID_PORTS, ID_LOGS,
- ID_CLEAR, ID_TRAY, ID_LOGIN, ID_OUTPUT, ID_STATUS, ID_OPENLOG, ID_EXPORT };
+ ID_CLEAR, ID_TRAY, ID_LOGIN, ID_OUTPUT, ID_STATUS, ID_OPENLOG, ID_EXPORT,
+ ID_NAV_SERVICES, ID_NAV_PORTS, ID_NAV_SETTINGS, ID_NAV_ABOUT };
 static HWND mainwin, list, output, status, subtitle, title, logtitle, loginbox;
+static HWND settings_title,settings_copy,about_title,about_copy,brand;
 static HINSTANCE instance;
 static HFONT font, boldfont, titlefont, monofont;
 static HBRUSH bgbrush, fieldbrush;
 static COLORREF bg=RGB(23,27,32), field=RGB(31,37,44), fg=RGB(224,231,238), muted=RGB(158,172,187), accent=RGB(90,218,170);
 static int scale=96, selected=-1, previous_count=-1;
+static int page=0;
 static wchar_t data_dir[2048];
 static NOTIFYICONDATAW tray;
 static HANDLE single;
@@ -35,7 +38,14 @@ static HWND control(HWND parent,const wchar_t *cls,const wchar_t *text,DWORD sty
  HWND c=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,px(x),px(y),px(w),px(h),parent,(HMENU)(INT_PTR)id,instance,NULL);
  SendMessageW(c,WM_SETFONT,(WPARAM)font,TRUE); return c;
 }
-static HWND button(HWND h,const wchar_t *name,int id,int x,int y,int w) { return control(h,L"BUTTON",name,WS_TABSTOP|BS_OWNERDRAW,id,x,y,w,32); }
+static LRESULT CALLBACK button_proc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data) {
+ (void)id; (void)data;
+ if(msg==WM_MOUSEMOVE && !GetPropW(h,L"PortmanHot")) { TRACKMOUSEEVENT t={sizeof(t),TME_LEAVE,h,0}; SetPropW(h,L"PortmanHot",(HANDLE)1); TrackMouseEvent(&t); InvalidateRect(h,NULL,TRUE); }
+ if(msg==WM_MOUSELEAVE) { RemovePropW(h,L"PortmanHot"); InvalidateRect(h,NULL,TRUE); }
+ if(msg==WM_NCDESTROY) RemoveWindowSubclass(h,button_proc,1);
+ return DefSubclassProc(h,msg,wp,lp);
+}
+static HWND button(HWND h,const wchar_t *name,int id,int x,int y,int w) { HWND b=control(h,L"BUTTON",name,WS_TABSTOP|BS_OWNERDRAW,id,x,y,w,32); SetWindowSubclass(b,button_proc,1,0); return b; }
 static HWND label(HWND h,const wchar_t *text,int x,int y,int w,int height) { return control(h,L"STATIC",text,0,0,x,y,w,height); }
 static HWND edit(HWND h,int id,int x,int y,int w,int lim) {
  HWND e=control(h,L"EDIT",L"",WS_BORDER|WS_TABSTOP|ES_AUTOHSCROLL,id,x,y,w,29);
@@ -47,9 +57,11 @@ static LRESULT colors(UINT msg,WPARAM wp) {
 }
 static void drawbutton(DRAWITEMSTRUCT *d) {
  wchar_t text[100]; GetWindowTextW(d->hwndItem,text,100);
- int primary=d->CtlID==ID_START || d->CtlID==ID_ADD || d->CtlID==IDOK;
+ int nav=d->CtlID>=ID_NAV_SERVICES && d->CtlID<=ID_NAV_ABOUT;
+ int primary=d->CtlID==ID_START || d->CtlID==ID_ADD || d->CtlID==IDOK || (nav && d->CtlID==ID_NAV_SERVICES+page);
  int disabled=d->itemState & ODS_DISABLED;
- COLORREF color=disabled?RGB(37,42,48):primary?accent:RGB(44,53,62);
+ COLORREF color=disabled?RGB(37,42,48):primary?accent:nav?RGB(27,33,39):RGB(44,53,62);
+ if(!disabled && GetPropW(d->hwndItem,L"PortmanHot")) color=primary?RGB(112,235,188):RGB(57,69,80);
  if(d->itemState & ODS_SELECTED) color=RGB(62,93,83);
  HBRUSH b=CreateSolidBrush(color); FillRect(d->hDC,&d->rcItem,b); DeleteObject(b);
  SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,disabled?muted:primary?bg:fg);
@@ -128,22 +140,42 @@ static void refreshlog(void) {
 }
 static void layout(void) {
  RECT r; GetClientRect(mainwin,&r); int w=MulDiv(r.right,96,scale),h=MulDiv(r.bottom,96,scale);
- move(title,24,19,w-420,33); move(subtitle,25,58,w-310,22);
- move(GetDlgItem(mainwin,ID_PORTS),w-262,26,112,32); move(GetDlgItem(mainwin,ID_TRAY),w-138,26,112,32);
- move(GetDlgItem(mainwin,ID_ADD),24,102,124,32); move(GetDlgItem(mainwin,ID_IMPORT),158,102,134,32);
- move(GetDlgItem(mainwin,ID_EDIT),302,102,78,32); move(GetDlgItem(mainwin,ID_REMOVE),390,102,88,32);
- move(GetDlgItem(mainwin,ID_EXPORT),488,102,110,32);
+ int left=204,cw=w-left-24;
+ move(title,left,19,cw-140,33); move(subtitle,left,58,cw-120,22);
+ move(GetDlgItem(mainwin,ID_TRAY),w-138,26,112,32);
+ move(GetDlgItem(mainwin,ID_NAV_SERVICES),18,112,162,38); move(GetDlgItem(mainwin,ID_NAV_PORTS),18,158,162,38);
+ move(GetDlgItem(mainwin,ID_NAV_SETTINGS),18,204,162,38); move(GetDlgItem(mainwin,ID_NAV_ABOUT),18,250,162,38);
+ move(brand,18,h-72,162,48);
+ move(GetDlgItem(mainwin,ID_ADD),left,102,124,32); move(GetDlgItem(mainwin,ID_IMPORT),left+134,102,134,32);
+ move(GetDlgItem(mainwin,ID_EDIT),left+278,102,78,32); move(GetDlgItem(mainwin,ID_REMOVE),left+366,102,88,32);
+ move(GetDlgItem(mainwin,ID_EXPORT),left+464,102,110,32);
  move(GetDlgItem(mainwin,ID_STARTALL),w-242,102,104,32); move(GetDlgItem(mainwin,ID_STOPALL),w-128,102,104,32);
  int lh=(h-340)/2; if(lh<130) lh=130;
- move(list,24,149,w-48,lh);
+ move(list,left,149,cw,lh);
  int y=160+lh;
  int ids[]={ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG}; int widths[]={92,92,100,122,116,100};
- int x=24; for(int i=0;i<6;i++) { move(GetDlgItem(mainwin,ids[i]),x,y,widths[i],32); x+=widths[i]+10; }
- move(status,25,y+42,w-50,32); move(logtitle,25,y+78,w-200,24);
+ int x=left; for(int i=0;i<6;i++) { move(GetDlgItem(mainwin,ids[i]),x,y,widths[i],32); x+=widths[i]+10; }
+ move(status,left+1,y+42,cw-2,32); move(logtitle,left+1,y+78,cw-176,24);
  move(GetDlgItem(mainwin,ID_CLEAR),w-124,y+71,100,28);
- move(output,24,y+105,w-48,h-y-158);
- move(loginbox,24,h-39,245,25); move(GetDlgItem(mainwin,ID_LOGS),w-146,h-43,122,29);
- ListView_SetColumnWidth(list,5,px(w-48-514));
+ move(output,left,y+105,cw,h-y-129);
+ move(settings_title,left,116,cw,38); move(settings_copy,left,169,cw,70);
+ move(loginbox,left,255,310,30); move(GetDlgItem(mainwin,ID_LOGS),left,303,140,34);
+ move(about_title,left,116,cw,38); move(about_copy,left,174,cw,150);
+ ListView_SetColumnWidth(list,5,px(cw-514));
+}
+
+static void show_page(int next) {
+ page=next;
+ int service_ids[]={ID_ADD,ID_IMPORT,ID_EDIT,ID_REMOVE,ID_EXPORT,ID_STARTALL,ID_STOPALL,ID_LIST,ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_STATUS,ID_CLEAR,ID_OUTPUT};
+ for(unsigned i=0;i<sizeof(service_ids)/sizeof(service_ids[0]);i++) ShowWindow(GetDlgItem(mainwin,service_ids[i]),page==0?SW_SHOW:SW_HIDE);
+ ShowWindow(logtitle,page==0?SW_SHOW:SW_HIDE);
+ ShowWindow(settings_title,page==2?SW_SHOW:SW_HIDE); ShowWindow(settings_copy,page==2?SW_SHOW:SW_HIDE);
+ ShowWindow(loginbox,page==2?SW_SHOW:SW_HIDE); ShowWindow(GetDlgItem(mainwin,ID_LOGS),page==2?SW_SHOW:SW_HIDE);
+ ShowWindow(about_title,page==3?SW_SHOW:SW_HIDE); ShowWindow(about_copy,page==3?SW_SHOW:SW_HIDE);
+ SetWindowTextW(title,page==0?L"Services":page==1?L"Ports":page==2?L"Settings":L"About Portman");
+ SetWindowTextW(subtitle,page==0?L"Start, stop, and understand every local service.":page==1?L"Inspect TCP listeners without terminating foreign processes.":page==2?L"Simple preferences for your Windows workflow.":L"A lightweight local development control panel.");
+ for(int id=ID_NAV_SERVICES;id<=ID_NAV_ABOUT;id++) InvalidateRect(GetDlgItem(mainwin,id),NULL,TRUE);
+ layout();
 }
 static void hide_tray(void) {
  Shell_NotifyIconW(NIM_DELETE,&tray);
@@ -297,6 +329,10 @@ static void do_action(int id) {
  case ID_OPENLOG: if(pmd_log_path(i,path,sizeof(path))) { to_w(path,w,4096); openpath(mainwin,w); } break;
  case ID_CLEAR: if(MessageBoxW(mainwin,L"Clear the selected service log?",L"Clear log",MB_YESNO|MB_ICONQUESTION)==IDYES && !pmd_clear_log(i)) backend_error(mainwin); break;
  case ID_PORTS: show_ports(); break;
+ case ID_NAV_SERVICES: show_page(0); break;
+ case ID_NAV_PORTS: show_ports(); break;
+ case ID_NAV_SETTINGS: show_page(2); break;
+ case ID_NAV_ABOUT: show_page(3); break;
  case ID_TRAY: hide_tray(); break;
  case ID_LOGIN: set_login(); break;
  }
@@ -310,9 +346,11 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  switch(msg) {
  case WM_CREATE: {
   mainwin=h;
-  title=label(h,L"PORTMAN  /  Control Panel",24,19,650,33); SendMessageW(title,WM_SETFONT,(WPARAM)titlefont,TRUE);
-  subtitle=label(h,L"Local development, under control.",24,60,660,24);
-  button(h,L"Ports",ID_PORTS,0,0,112); button(h,L"To tray",ID_TRAY,0,0,112);
+  label(h,L"PORTMAN",18,24,162,32); title=label(h,L"Services",204,19,650,33); SendMessageW(title,WM_SETFONT,(WPARAM)titlefont,TRUE);
+  subtitle=label(h,L"Start, stop, and understand every local service.",204,60,660,24);
+  button(h,L"Services",ID_NAV_SERVICES,0,0,162); button(h,L"Ports",ID_NAV_PORTS,0,0,162); button(h,L"Settings",ID_NAV_SETTINGS,0,0,162); button(h,L"About",ID_NAV_ABOUT,0,0,162);
+  brand=label(h,L"Built with \u2665\nby rakarmp (rezz990)",18,0,162,48);
+  button(h,L"To tray",ID_TRAY,0,0,112);
   button(h,L"+ Add service",ID_ADD,0,0,124); button(h,L"Import dev.toml",ID_IMPORT,0,0,134);
   button(h,L"Edit",ID_EDIT,0,0,78); button(h,L"Remove",ID_REMOVE,0,0,88); button(h,L"Export config",ID_EXPORT,0,0,110);
   button(h,L"Start all",ID_STARTALL,0,0,104); button(h,L"Stop all",ID_STOPALL,0,0,104);
@@ -323,9 +361,13 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
   output=control(h,L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|ES_AUTOHSCROLL,ID_OUTPUT,0,0,0,0); SendMessageW(output,WM_SETFONT,(WPARAM)monofont,TRUE); SendMessageW(output,EM_SETLIMITTEXT,100000,0);
   loginbox=control(h,L"BUTTON",L"Open Portman at sign-in",WS_TABSTOP|BS_AUTOCHECKBOX,ID_LOGIN,0,0,245,25); SendMessageW(loginbox,BM_SETCHECK,login_enabled()?BST_CHECKED:BST_UNCHECKED,0);
   button(h,L"Logs folder",ID_LOGS,0,0,122);
+  settings_title=label(h,L"Windows preferences",0,0,500,38); SendMessageW(settings_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
+  settings_copy=label(h,L"STARTUP\nOpen the control panel when you sign in. Services never start automatically.",0,0,700,70);
+  about_title=label(h,L"Local development, under control.",0,0,700,38); SendMessageW(about_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
+  about_copy=label(h,L"Portman 0.2.2\n\nNative Win32 interface. Zig service engine. No browser, Electron, .NET, Node.js, or administrator access required.\n\nBuilt with \u2665 by rakarmp (rezz990)",0,0,700,150);
   tray.cbSize=sizeof(tray); tray.hWnd=h; tray.uID=1; tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP; tray.uCallbackMessage=TRAYMSG; tray.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1)); wcscpy(tray.szTip,L"Portman - double-click to open");
   if(!Shell_NotifyIconW(NIM_ADD,&tray)) EnableWindow(GetDlgItem(h,ID_TRAY),FALSE);
-  SetTimer(h,1,1500,NULL); refresh(); refreshlog(); return 0;
+  SetTimer(h,1,1500,NULL); refresh(); refreshlog(); show_page(0); return 0;
  }
  case WM_SIZE: layout(); return 0;
  case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize.x=px(900); ((MINMAXINFO*)lp)->ptMinTrackSize.y=px(690); return 0;

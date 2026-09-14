@@ -33,6 +33,8 @@ The current local validation result for 0.2.2 is **9 engine/parser tests passed 
 14. Reinstall over a stopped existing installation. Confirm configuration/logs remain and stale versioned installers are not left in the output.
 15. Uninstall from Windows Settings or `Uninstall.exe`. Confirm app files, shortcuts, and startup entry are removed while project folders and `%LOCALAPPDATA%\\Portman` data remain.
 16. Test sign-out/restart with an active service and verify the documented cleanup behavior.
+17. Use the Services, Ports, Settings, and About navigation with mouse and keyboard. Confirm the active item, focus rectangle, empty-service guidance, branding, and disabled actions remain clear.
+18. Run `python scripts/build_windows.py`; extract both generated ZIP files and verify the portable archive launches while the source archive contains no `.git`, cache, payload, or previous `dist` directory.
 
 ## Bug report evidence
 
