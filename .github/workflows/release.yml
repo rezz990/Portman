@@ -41,7 +41,7 @@ jobs:
           Copy-Item dist/windows-release/bin/portman-cli.exe $out
           Get-FileHash "$out/*.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Set-Content "$out/SHA256SUMS.txt"
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: portman-windows-x64
           path: release/
