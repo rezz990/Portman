@@ -1,0 +1,5 @@
+Portman
+
+Copyright (c) 2026 Reza / rezz990
+
+Portman uses the Zig compiler and links against platform libraries provided by Windows or the target operating system. Those toolchain and system components remain subject to their own licenses.

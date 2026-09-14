@@ -1,0 +1,15 @@
+# Adapt these folders before import. Import does not execute commands.
+[project]
+name = "windows-workspace"
+
+[[services]]
+name = "carwash-web"
+command = "npm run dev"
+cwd = "C:/Projects/Carwash"
+port = 3000
+
+[[services]]
+name = "personal-laravel"
+command = "php artisan serve --host=127.0.0.1 --port=8000"
+cwd = "C:/Projects/webdev-cms"
+port = 8000

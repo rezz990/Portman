@@ -1,0 +1,7 @@
+.zig-cache/
+zig-out/
+.portman/
+__pycache__/
+
+windows/payload/
+*.pdb

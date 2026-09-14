@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible problem in Portman
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove secrets and private paths from logs before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: Portman version
+      placeholder: 0.2.1
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Windows GUI
+        - Windows installer
+        - Windows CLI
+        - Linux CLI
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the exact service command, expected port, and project type. Remove secrets.
+      placeholder: |
+        1. Open Portman...
+        2. Add service...
+        3. Press Start...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output or screenshots
+      description: Redact tokens, passwords, private paths, and customer data.
+      render: text
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Windows 11 24H2, x64, 125% scaling, Node 22
+    validations:
+      required: true

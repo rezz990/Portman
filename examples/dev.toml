@@ -1,0 +1,14 @@
+[project]
+name = "carwash"
+
+[[services]]
+name = "web"
+command = "npm run dev -- --port 3000"
+cwd = "../web"
+port = 3000
+
+[[services]]
+name = "api"
+command = "php artisan serve --host=127.0.0.1 --port=8000"
+cwd = "../api"
+port = 8000

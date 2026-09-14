@@ -1,0 +1,2 @@
+Portman 0.2.2 source package.
+Replace docs/images placeholders with native Windows screenshots before publishing.

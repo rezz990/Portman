@@ -1,0 +1,29 @@
+name: build-and-test
+on: [push, pull_request]
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ziglang==0.14.1
+      - run: python -m ziglang fmt --check build.zig src/main.zig src/config.zig src/desktop.zig windows/setup.zig
+      - run: python -m ziglang build test-desktop
+      - run: python -m ziglang build -Doptimize=ReleaseSafe
+      - if: runner.os == 'Linux'
+        run: python tests/integration.py zig-out/bin/portman
+      - if: runner.os == 'Windows'
+        run: python tests/integration.py zig-out/bin/portman-cli.exe
+      - if: runner.os == 'Windows'
+        run: python scripts/build_windows.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portman-${{ runner.os }}
+          path: |
+            zig-out/bin/
+            dist/windows-release/bin/*.exe

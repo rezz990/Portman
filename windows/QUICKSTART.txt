@@ -1,0 +1,29 @@
+PORTMAN 0.2.2 - WINDOWS CONTROL PANEL
+
+1. Open Portman from the Start menu.
+2. Add service: enter a unique name, choose the project folder,
+   enter its command (for example npm run dev), and expected port.
+3. Save service, then Start. Use Output to diagnose startup errors.
+4. Listening means the expected TCP port belongs to this service's
+   process tree. Running means a process is alive with no port configured.
+5. Stop/Restart, Open browser, Project folder and logs are on the panel.
+6. Import dev.toml adds trusted existing Portman configurations.
+7. To tray keeps managed services running. Exit stops them.
+
+Requires Windows 10/11 x64. No Zig, Node or .NET needed for Portman itself.
+Node/PHP/Python/etc. must be installed separately for commands using them.
+Changing Expected port does not rewrite your command or app configuration.
+Start all launches sequentially, without dependency readiness ordering.
+No automatic service start at login; sign-in setting only opens the panel.
+
+Data: %LOCALAPPDATA%\Portman\services.toml
+Logs: %LOCALAPPDATA%\Portman\logs
+App:  %LOCALAPPDATA%\Programs\Portman
+CLI:  portman-cli.exe (not added to PATH)
+
+Stop force-terminates managed process trees on Windows. Flush database
+writes using that database's own shutdown procedure when necessary.
+No automatic restart after crashes. Port inspection is TCP only.
+Installer is unsigned. Native Windows acceptance testing remains required.
+Uninstall via Windows Settings > Apps > Portman, or Uninstall.exe --uninstall.
+Uninstall keeps settings, logs and all project folders.

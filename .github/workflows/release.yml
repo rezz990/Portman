@@ -1,0 +1,58 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Mark the GitHub Release as a pre-release
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Zig
+        run: python -m pip install ziglang==0.14.1
+      - name: Format check
+        run: python -m ziglang fmt --check build.zig src/main.zig src/config.zig src/desktop.zig windows/setup.zig
+      - name: Engine tests
+        run: python -m ziglang build test-desktop
+      - name: Build Windows x64 binaries and installer
+        run: python scripts/build_windows.py
+      - name: Package release files
+        shell: pwsh
+        run: |
+          $out = "release"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item dist/windows-release/bin/Portman-Setup-*.exe $out
+          Copy-Item dist/windows-release/bin/Portman.exe $out
+          Copy-Item dist/windows-release/bin/portman-cli.exe $out
+          Get-FileHash "$out/*.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)" } | Set-Content "$out/SHA256SUMS.txt"
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: portman-windows-x64
+          path: release/
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            release/Portman-Setup-*.exe
+            release/Portman.exe
+            release/portman-cli.exe
+            release/SHA256SUMS.txt
