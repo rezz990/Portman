@@ -1,5 +1,6 @@
 .zig-cache/
 zig-out/
+dist/
 .portman/
 __pycache__/
 

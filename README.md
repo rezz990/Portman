@@ -46,11 +46,13 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 ### Windows desktop panel
 
 - Native Win32 GUI with a dark charcoal interface.
+- Persistent Services, Ports, Settings, and About navigation with clear active and keyboard-focus states.
 - Service table with status, port, PID, uptime, and command.
 - Add, edit, remove, start, stop, restart, start all, and stop all.
 - Double-click a service to edit it.
 - Service editor templates for custom commands, npm, Bun, Laravel/PHP, PHP's built-in server, and Python HTTP server.
 - Project folder picker and validation before saving.
+- Responsive split workspace for the service list, selected-service guidance, and a readable monospace log tail; sizing is DPI-aware.
 
 ### Service lifecycle
 
@@ -232,7 +234,9 @@ If Zig is installed outside Python:
 python scripts/build_windows.py --zig C:\\tools\\zig\\zig.exe
 ```
 
-The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.2.exe`. Release output is under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
+The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.2.exe`. It also prepares a portable Windows ZIP, a clean source ZIP, and `dist/SHA256SUMS.txt`. Release output is under `dist/`; binaries and the installer are under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
+
+Prepared files are `Portman-Setup-0.2.2.exe`, `Portman-0.2.2-windows-x64.zip`, and `Portman-0.2.2-source.zip`. The source archive excludes Git metadata, caches, compiler output, installer payload staging, and previous release output. Nothing in the build script uploads or publishes an artifact.
 
 Do not commit `.zig-cache`, `zig-out`, `.pdb`, `windows/payload`, personal runtime data, or `%LOCALAPPDATA%\\Portman` files. The repository `.gitignore` covers generated build output and payloads.
 
