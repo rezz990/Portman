@@ -13,13 +13,17 @@ Portman is designed for the workflow behind projects such as Next.js, Vite, Lara
 
 <!-- Replace the included placeholders with real captures listed in docs/SCREENSHOTS.md. -->
 
-![Portman control panel](docs/images/01-main-panel.png)
+![Portman control panel](docs/images/01.png)
 
-_Portman control panel with service status, ports, uptime, actions, and output._
+_Portman control panel with service._
 
-![Listening service and output](docs/images/03-listening-log.png)
+![Listening service and output](docs/images/02.png)
 
-![Port inspector](docs/images/04-port-inspector.png)
+_Listening service and output._
+
+![Port inspector](docs/images/03.png)
+
+_Port inspector._
 
 ## Why Portman exists
 
