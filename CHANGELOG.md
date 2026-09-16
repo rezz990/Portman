@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.4 — Release preparation (preview)
+
+- Added VERSION with a synchronization command and stale-label CI gate.
+- Unified installer, portable/source ZIPs, build provenance and checksums in dist/release.
+- Added package integrity verification and seven tooling regression tests.
+- Windows release workflow now tests the CLI and prepares a draft pre-release with all assets.
+- Added exact-tag validation and a maintainer Windows review checklist.
+- Retains the 0.2.3 UI and service behavior; full Windows acceptance remains pending.
+
+
+## 0.2.3 — Windows interface polish (preview)
+
+- Consistent dark table headers and rows, colored statuses, taller rows, and rounded actions.
+- Wrapped action toolbar, bounded service-list height, immediate selection updates, and automatic initial selection.
+- Pausable, word-wrapped output and dark template/checkbox rendering.
+- Correct native installer checkbox behavior, initialized progress control, monotonic progress, and readable details action.
+- System-DPI-scaled installer and supported dark title bars.
+- Native Windows visual acceptance remains pending; see docs/UI-0.2.3.md.
+
+
 ## 0.2.2 — Branded Windows installer
 
 - Rebuilt the installer UI as a native charcoal onboarding panel with Portman branding.

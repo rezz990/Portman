@@ -9,7 +9,9 @@
 
 Portman is designed for the workflow behind projects such as Next.js, Vite, Laravel, PHP, Bun, Python, Android APIs, and local databases. It does not install those runtimes or rewrite their project configuration. You provide the command and Portman manages the process tree around it.
 
-> **Current status:** `0.2.2` is a Windows GUI preview. The Windows x64 binaries compile successfully and the service engine/CLI suites pass in local validation. A GitHub Actions workflow is included for repeatable CI. Native Windows acceptance should still be run before using the preview for an important database or production-like environment.
+> **UI update:** The 0.2.3 interface revision and its Windows acceptance checklist are documented in [docs/UI-0.2.3.md](docs/UI-0.2.3.md). Existing screenshots show the earlier interface.
+
+> **Current status:** `0.2.4` is a Windows GUI preview. The Windows x64 binaries compile successfully and the service engine/CLI suites pass in local validation. A GitHub Actions workflow is included for repeatable CI. Native Windows acceptance should still be run before using the preview for an important database or production-like environment.
 
 <!-- Replace the included placeholders with real captures listed in docs/SCREENSHOTS.md. -->
 
@@ -56,7 +58,7 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 - Double-click a service to edit it.
 - Service editor templates for custom commands, npm, Bun, Laravel/PHP, PHP's built-in server, and Python HTTP server.
 - Project folder picker and validation before saving.
-- Responsive split workspace for the service list, selected-service guidance, and a readable monospace log tail; sizing is DPI-aware.
+- Responsive split workspace for the service list, selected-service guidance, and a readable monospace log tail; sizing follows the system DPI at launch.
 
 ### Service lifecycle
 
@@ -92,7 +94,7 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 
 ### Installer (recommended)
 
-1. Download `Portman-Setup-0.2.2.exe` from the GitHub Release page.
+1. Download `Portman-Setup-0.2.4.exe` from the GitHub Release page.
 2. Run it as the normal Windows user who will use Portman.
 3. Leave **Create desktop shortcut** and **Open Portman after installation** enabled if desired.
 4. Click **Install**.
@@ -209,6 +211,10 @@ The Windows CLI is named `portman-cli.exe` so it can coexist with the GUI execut
 
 `kill` and `free` require confirmation and a matching PID. Windows termination requires `--force`. The CLI reference is kept in [`docs/CLI-v0.1.md`](docs/CLI-v0.1.md); the desktop panel is the main Windows workflow.
 
+## Release preparation
+
+Application version labels are synchronized from `VERSION` using `python scripts/version.py`. CI checks consistency. The build produces a verified five-file bundle in `dist/release/`, including build provenance and checksums. Tag workflows prepare a draft pre-release for owner review. See [release instructions](docs/RELEASING.md) and the [Windows review checklist](REVIEW.md).
+
 ## Building from source
 
 Portman pins Zig **0.14.1**. Use the same compiler locally and in CI.
@@ -220,6 +226,7 @@ python -m pip install ziglang==0.14.1
 python -m ziglang fmt --check build.zig src/main.zig src/config.zig src/desktop.zig windows/setup.zig
 python -m ziglang build test
 python -m ziglang build test-desktop
+python -m ziglang build -Doptimize=ReleaseSafe
 python tests/integration.py zig-out/bin/portman
 ```
 
@@ -238,9 +245,9 @@ If Zig is installed outside Python:
 python scripts/build_windows.py --zig C:\\tools\\zig\\zig.exe
 ```
 
-The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.2.exe`. It also prepares a portable Windows ZIP, a clean source ZIP, and `dist/SHA256SUMS.txt`. Release output is under `dist/`; binaries and the installer are under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
+The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.4.exe`. It also prepares a portable Windows ZIP, a clean source ZIP, and `dist/SHA256SUMS.txt`. Release output is under `dist/`; binaries and the installer are under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
 
-Prepared files are `Portman-Setup-0.2.2.exe`, `Portman-0.2.2-windows-x64.zip`, and `Portman-0.2.2-source.zip`. The source archive excludes Git metadata, caches, compiler output, installer payload staging, and previous release output. Nothing in the build script uploads or publishes an artifact.
+Prepared files are `Portman-Setup-0.2.4.exe`, `Portman-0.2.4-windows-x64.zip`, and `Portman-0.2.4-source.zip`. The source archive excludes Git metadata, caches, compiler output, installer payload staging, and previous release output. Nothing in the build script uploads or publishes an artifact.
 
 Do not commit `.zig-cache`, `zig-out`, `.pdb`, `windows/payload`, personal runtime data, or `%LOCALAPPDATA%\\Portman` files. The repository `.gitignore` covers generated build output and payloads.
 

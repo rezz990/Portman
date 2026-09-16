@@ -10,12 +10,15 @@
 #include <stdio.h>
 #include <wchar.h>
 #include "setup.h"
+#include "../src/ui/theme.h"
 static const wchar_t *keypath=L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Portman";
 static wchar_t install_dir[2048], self[2048], programs[MAX_PATH], desktop[MAX_PATH];
 static const unsigned char *gui_data,*cli_data,*guide_data;
 static size_t gui_size,cli_size,guide_size;
 static HWND window, state, launchbox, deskbox, installbtn, cancelbtn, detailsbtn, progressbar;
-static HWND pathlabel, detailslabel, versionlabel;
+static int setup_dpi=96;
+static HFONT controlfont,controlsmall;
+static int spx(int v) {return MulDiv(v,setup_dpi,96);}
 static HFONT font, smallfont, boldfont, titlefont, mono_font;
 static HBRUSH background, panel, accent_panel;
 static int details_open=0;
@@ -25,7 +28,7 @@ static void paths(wchar_t *out,size_t cap,const wchar_t *name) { swprintf(out,ca
 static void installer_progress(int value,const wchar_t *message) {
  if(progressbar) SendMessageW(progressbar,PBM_SETPOS,value,0);
  if(state) SetWindowTextW(state,message);
- if(window) { UpdateWindow(window); Sleep(value<100?90:40); }
+ if(window) { UpdateWindow(window); UpdateWindow(progressbar); UpdateWindow(state); }
 }
 static int write_file(const wchar_t *path,const unsigned char *bytes,size_t length) {
  HANDLE h=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
@@ -62,7 +65,7 @@ static int install(void) {
   if(!ok) { notice(L"Could not prepare application files. Check free space and folder permissions."); goto rollback; }
   installer_progress(15+(i+1)*14,L"Copying Portman components...");
  }
- installer_progress(70,L"Registering Portman with Windows...");
+ installer_progress(75,L"Registering Portman with Windows...");
  for(int i=0;i<4;i++) {
   paths(dest,2200,names[i]); swprintf(backup,2200,L"%s.bak",dest); swprintf(temp,2200,L"%s.new",dest);
   if(GetFileAttributesW(dest)!=INVALID_FILE_ATTRIBUTES) {
@@ -75,7 +78,7 @@ static int install(void) {
  HKEY key;
  if(RegCreateKeyExW(HKEY_CURRENT_USER,keypath,0,NULL,0,KEY_SET_VALUE,NULL,&key,NULL)!=ERROR_SUCCESS) { notice(L"Could not register the uninstaller."); goto rollback; }
  wchar_t uninstall[2200], icon[2200]; paths(dest,2200,L"Uninstall.exe"); swprintf(uninstall,2200,L"\"%s\" --uninstall",dest); paths(icon,2200,L"Portman.exe");
- int ok=reg_string(key,L"DisplayName",L"Portman") && reg_string(key,L"DisplayVersion",L"0.2.2") && reg_string(key,L"Publisher",L"Portman Project") && reg_string(key,L"InstallLocation",install_dir) && reg_string(key,L"DisplayIcon",icon) && reg_string(key,L"UninstallString",uninstall);
+ int ok=reg_string(key,L"DisplayName",L"Portman") && reg_string(key,L"DisplayVersion",L"0.2.4") && reg_string(key,L"Publisher",L"rakarmp (rezz990)") && reg_string(key,L"InstallLocation",install_dir) && reg_string(key,L"DisplayIcon",icon) && reg_string(key,L"UninstallString",uninstall);
  DWORD one=1,size=(DWORD)((gui_size+cli_size+guide_size)*2/1024);
  RegSetValueExW(key,L"NoModify",0,REG_DWORD,(BYTE*)&one,4); RegSetValueExW(key,L"NoRepair",0,REG_DWORD,(BYTE*)&one,4); RegSetValueExW(key,L"EstimatedSize",0,REG_DWORD,(BYTE*)&size,4); RegCloseKey(key);
  if(!ok) { notice(L"Registration was incomplete. The application files are installed; run setup again to repair registration."); return 0; }
@@ -84,7 +87,7 @@ static int install(void) {
  if(!shortcut(temp,dest)) notice(L"Installed, but the Start menu shortcut could not be created. Open Portman.exe in the install folder.");
  if(SendMessageW(deskbox,BM_GETCHECK,0,0)==BST_CHECKED) { swprintf(temp,2200,L"%s\\Portman.lnk",desktop); if(!shortcut(temp,dest)) notice(L"The desktop shortcut could not be created."); }
  for(int i=0;i<4;i++) { swprintf(backup,2200,L"%s\\%s.bak",install_dir,names[i]); DeleteFileW(backup); }
- installer_progress(100,L"Portman is ready. Launching your control panel...");
+ installer_progress(100,L"Portman is installed and ready.");
  return 1;
 rollback:
  for(int i=3;i>=0;i--) {
@@ -129,8 +132,8 @@ static void fill_card(HDC dc,int x,int y,int w,int h,const wchar_t *eyebrow,cons
  RECT q={x+18,y+62,x+w-18,y+h-10}; draw_text(dc,body,q,smallfont,RGB(165,181,193),DT_WORDBREAK);
 }
 static void paint_install_window(HWND h,HDC dc) {
- RECT client; GetClientRect(h,&client); int w=client.right, height=client.bottom;
- HBRUSH b=CreateSolidBrush(RGB(19,24,29)); FillRect(dc,&client,b); DeleteObject(b);
+ RECT client; GetClientRect(h,&client); int w=MulDiv(client.right,96,setup_dpi), height=MulDiv(client.bottom,96,setup_dpi); client.right=w;client.bottom=height;
+ HBRUSH b=CreateSolidBrush(RGB(23,27,32)); FillRect(dc,&client,b); DeleteObject(b);
  HBRUSH hero=CreateSolidBrush(RGB(28,38,43)); RECT hr={0,0,w,128}; FillRect(dc,&hr,hero); DeleteObject(hero);
  RECT line={0,124,w,128}; HBRUSH green=CreateSolidBrush(RGB(90,218,170)); FillRect(dc,&line,green); DeleteObject(green);
  RECT r={36,25,w-220,64}; draw_text(dc,L"PORTMAN",r,titlefont,RGB(238,245,250),DT_SINGLELINE);
@@ -144,47 +147,49 @@ static void paint_install_window(HWND h,HDC dc) {
  RECT info={36,350,w-36,374}; draw_text(dc,L"INSTALL LOCATION",info,smallfont,RGB(90,218,170),DT_SINGLELINE);
  RECT path={36,378,w-36,409}; HBRUSH p=CreateSolidBrush(RGB(35,43,50)); FillRect(dc,&path,p); DeleteObject(p); draw_text(dc,install_dir,path,mono_font,RGB(219,232,238),DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS);
  RECT note={36,420,w-36,444}; draw_text(dc,L"Per-user install • local-first • no runtime bundled • Node/PHP/Bun/Python stay yours to manage",note,smallfont,RGB(145,164,176),DT_SINGLELINE);
- RECT footer={36,height-31,w-36,height-8}; draw_text(dc,L"Portman 0.2.2  •  Built with \u2665 by rakarmp (rezz990)",footer,smallfont,RGB(123,144,154),DT_SINGLELINE);
+ RECT footer={36,height-31,w-36,height-8}; draw_text(dc,L"Portman 0.2.4  •  Built with \u2665 by rakarmp (rezz990)",footer,smallfont,RGB(123,144,154),DT_SINGLELINE);
 }
 static void draw_button(DRAWITEMSTRUCT *d) {
+ FillRect(d->hDC,&d->rcItem,background);
  wchar_t text[160]; GetWindowTextW(d->hwndItem,text,160);
- int checkbox=(d->CtlID==102 || d->CtlID==103);
- if(checkbox) {
-  RECT box=d->rcItem; box.right=box.left+18; box.bottom=box.top+18; HBRUSH qb=CreateSolidBrush(RGB(35,43,50)); FillRect(d->hDC,&box,qb); DeleteObject(qb);
-  HBRUSH frame=CreateSolidBrush(RGB(104,126,135)); FrameRect(d->hDC,&box,frame); DeleteObject(frame);
-  if(SendMessageW(d->hwndItem,BM_GETCHECK,0,0)==BST_CHECKED) { HBRUSH cb=CreateSolidBrush(RGB(90,218,170)); FillRect(d->hDC,&box,cb); DeleteObject(cb); draw_text(d->hDC,L"\u2713",box,boldfont,RGB(19,24,29),DT_CENTER|DT_VCENTER|DT_SINGLELINE); }
-  RECT label=d->rcItem; label.left+=27; draw_text(d->hDC,text,label,font,RGB(214,228,232),DT_VCENTER|DT_SINGLELINE); return;
- }
  COLORREF color=(d->CtlID==IDOK)?RGB(90,218,170):RGB(47,59,66); if(d->itemState&ODS_SELECTED) color=(d->CtlID==IDOK)?RGB(117,236,190):RGB(68,84,92);
- HBRUSH b=CreateSolidBrush(color); FillRect(d->hDC,&d->rcItem,b); DeleteObject(b);
- draw_text(d->hDC,text,d->rcItem,(d->CtlID==IDOK)?boldfont:font,(d->CtlID==IDOK)?RGB(19,24,29):RGB(228,237,240),DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+ pm_round(d->hDC,d->rcItem,color,spx(8));
+ draw_text(d->hDC,text,d->rcItem,controlfont,(d->CtlID==IDOK)?RGB(23,27,32):RGB(228,237,240),DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+ if(d->itemState&ODS_FOCUS) { RECT f=d->rcItem; InflateRect(&f,-3,-3); DrawFocusRect(d->hDC,&f); }
 }
 static LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  switch(msg) {
- case WM_PAINT: { PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); paint_install_window(h,dc); EndPaint(h,&ps); return 0; }
+ case WM_PAINT: { PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); int saved=SaveDC(dc); SetMapMode(dc,MM_ANISOTROPIC); SetWindowExtEx(dc,96,96,NULL); SetViewportExtEx(dc,setup_dpi,setup_dpi,NULL); paint_install_window(h,dc); RestoreDC(dc,saved); EndPaint(h,&ps); return 0; }
  case WM_ERASEBKGND: return 1;
  case WM_CREATE: {
   window=h;
-  deskbox=CreateWindowW(L"BUTTON",L"Create a desktop shortcut",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX|BS_OWNERDRAW,36,452,275,26,h,(HMENU)102,NULL,NULL); SendMessageW(deskbox,WM_SETFONT,(WPARAM)font,TRUE); SendMessageW(deskbox,BM_SETCHECK,BST_CHECKED,0);
-  launchbox=CreateWindowW(L"BUTTON",L"Open Portman after installation",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX|BS_OWNERDRAW,322,452,310,26,h,(HMENU)103,NULL,NULL); SendMessageW(launchbox,WM_SETFONT,(WPARAM)font,TRUE); SendMessageW(launchbox,BM_SETCHECK,BST_CHECKED,0);
-  detailsbtn=CreateWindowW(L"BUTTON",L"Show installation details",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,650,451,150,27,h,(HMENU)104,NULL,NULL); SendMessageW(detailsbtn,WM_SETFONT,(WPARAM)smallfont,TRUE);
-  state=CreateWindowW(L"STATIC",L"Ready to install Portman.",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,36,484,520,25,h,NULL,NULL,NULL); SendMessageW(state,WM_SETFONT,(WPARAM)smallfont,TRUE);
+  deskbox=CreateWindowW(L"BUTTON",L"Create a desktop shortcut",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,36,452,275,26,h,(HMENU)102,NULL,NULL); SendMessageW(deskbox,WM_SETFONT,(WPARAM)font,TRUE); SendMessageW(deskbox,BM_SETCHECK,BST_CHECKED,0);
+  launchbox=CreateWindowW(L"BUTTON",L"Open Portman after installation",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,322,452,310,26,h,(HMENU)103,NULL,NULL); SendMessageW(launchbox,WM_SETFONT,(WPARAM)font,TRUE); SendMessageW(launchbox,BM_SETCHECK,BST_CHECKED,0);
+  detailsbtn=CreateWindowW(L"BUTTON",L"Show details",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,36,531,235,32,h,(HMENU)104,NULL,NULL); SendMessageW(detailsbtn,WM_SETFONT,(WPARAM)smallfont,TRUE);
+  state=CreateWindowW(L"STATIC",L"Ready to install Portman.",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,36,484,764,25,h,NULL,NULL,NULL); SendMessageW(state,WM_SETFONT,(WPARAM)smallfont,TRUE);
   progressbar=CreateWindowExW(0,PROGRESS_CLASSW,L"",WS_CHILD|WS_VISIBLE|PBS_SMOOTH,36,512,764,8,h,(HMENU)105,NULL, NULL); SendMessageW(progressbar,PBM_SETRANGE,0,MAKELPARAM(0,100)); SendMessageW(progressbar,PBM_SETBARCOLOR,0,RGB(90,218,170)); SendMessageW(progressbar,PBM_SETBKCOLOR,0,RGB(35,43,50));
   installbtn=CreateWindowW(L"BUTTON",L"Install Portman",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_DEFPUSHBUTTON|BS_OWNERDRAW,520,538,145,38,h,(HMENU)IDOK,NULL,NULL); SendMessageW(installbtn,WM_SETFONT,(WPARAM)boldfont,TRUE);
-  cancelbtn=CreateWindowW(L"BUTTON",L"Cancel",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,676,538,124,38,h,(HMENU)IDCANCEL,NULL,NULL); SendMessageW(cancelbtn,WM_SETFONT,(WPARAM)font,TRUE); return 0;
+  cancelbtn=CreateWindowW(L"BUTTON",L"Cancel",WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_OWNERDRAW,676,538,124,38,h,(HMENU)IDCANCEL,NULL,NULL); SendMessageW(cancelbtn,WM_SETFONT,(WPARAM)font,TRUE);
+  for(HWND child=GetWindow(h,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT)) {
+   RECT r;GetWindowRect(child,&r);MapWindowPoints(NULL,h,(POINT*)&r,2);MoveWindow(child,spx(r.left),spx(r.top),spx(r.right-r.left),spx(r.bottom-r.top),TRUE);
+   SendMessageW(child,WM_SETFONT,(WPARAM)(child==state?controlsmall:controlfont),TRUE);
+  }
+  SetWindowSubclass(deskbox,pm_check,1,0); SetWindowSubclass(launchbox,pm_check,1,0);
+  SetWindowTheme(progressbar,L"",L"");
+  return 0;
   }
   case WM_COMMAND:
   if(LOWORD(wp)==IDCANCEL) DestroyWindow(h);
-  if(LOWORD(wp)==104 && HIWORD(wp)==BN_CLICKED) { details_open=!details_open; if(details_open) { SetWindowTextW(detailsbtn,L"Hide installation details"); SetWindowTextW(state,L"Includes GUI, CLI, uninstaller, Start menu shortcut, and QUICKSTART guide."); } else { SetWindowTextW(detailsbtn,L"Show installation details"); SetWindowTextW(state,L"Ready to install Portman."); } InvalidateRect(h,NULL,FALSE); }
+  if(LOWORD(wp)==104 && HIWORD(wp)==BN_CLICKED) { details_open=!details_open; if(details_open) { SetWindowTextW(detailsbtn,L"Hide details"); SetWindowTextW(state,L"Includes GUI, CLI, uninstaller, Start menu shortcut, and QUICKSTART guide."); } else { SetWindowTextW(detailsbtn,L"Show details"); SetWindowTextW(state,L"Ready to install Portman."); } InvalidateRect(h,NULL,FALSE); }
   if(LOWORD(wp)==IDOK) {
-   EnableWindow(installbtn,FALSE); SetWindowTextW(state,L"Installing..."); UpdateWindow(h);
+   EnableWindow(installbtn,FALSE); EnableWindow(cancelbtn,FALSE); EnableWindow(detailsbtn,FALSE); EnableWindow(deskbox,FALSE); EnableWindow(launchbox,FALSE); SetWindowTextW(state,L"Installing..."); UpdateWindow(h);
    if(install()) {
     if(SendMessageW(launchbox,BM_GETCHECK,0,0)==BST_CHECKED) { wchar_t app[2200]; paths(app,2200,L"Portman.exe"); if((INT_PTR)ShellExecuteW(h,L"open",app,NULL,install_dir,SW_SHOWNORMAL)<=32) notice(L"Installed. Windows could not launch the app automatically; open Portman from the Start menu."); }
     else MessageBoxW(h,L"Installed. Open Portman from the Start menu.",L"Portman",MB_OK|MB_ICONINFORMATION);
     DestroyWindow(h);
-   } else { EnableWindow(installbtn,TRUE); SetWindowTextW(state,L"Installation did not finish. Resolve the error and retry."); }
+   } else { EnableWindow(installbtn,TRUE); EnableWindow(cancelbtn,TRUE); EnableWindow(detailsbtn,TRUE); EnableWindow(deskbox,TRUE); EnableWindow(launchbox,TRUE); SetWindowTextW(state,L"Installation did not finish. Resolve the error and retry."); }
   } return 0;
- case WM_CTLCOLORSTATIC: { HDC dc=(HDC)wp; SetTextColor(dc,RGB(165,181,193)); SetBkColor(dc,RGB(19,24,29)); return (LRESULT)background; }
+ case WM_CTLCOLORSTATIC: { HDC dc=(HDC)wp; SetTextColor(dc,RGB(165,181,193)); SetBkColor(dc,RGB(23,27,32)); return (LRESULT)background; }
  case WM_DRAWITEM: draw_button((DRAWITEMSTRUCT*)lp); return TRUE;
  case WM_DESTROY: PostQuitMessage(0); return 0;
  } return DefWindowProcW(h,msg,wp,lp);
@@ -192,6 +197,8 @@ static LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
 int pmi_main(const unsigned char *g,size_t gs,const unsigned char *c,size_t cs,const unsigned char *guide,size_t guides) {
  gui_data=g; gui_size=gs; cli_data=c; cli_size=cs; guide_data=guide; guide_size=guides;
  CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
+ INITCOMMONCONTROLSEX ic={sizeof(ic),ICC_PROGRESS_CLASS|ICC_STANDARD_CLASSES}; InitCommonControlsEx(&ic);
+ HDC screen=GetDC(NULL);setup_dpi=GetDeviceCaps(screen,LOGPIXELSX);ReleaseDC(NULL,screen);
  wchar_t local[MAX_PATH]; if(FAILED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,SHGFP_TYPE_CURRENT,local)) || FAILED(SHGetFolderPathW(NULL,CSIDL_PROGRAMS|CSIDL_FLAG_CREATE,NULL,SHGFP_TYPE_CURRENT,programs)) || FAILED(SHGetFolderPathW(NULL,CSIDL_DESKTOPDIRECTORY,NULL,SHGFP_TYPE_CURRENT,desktop))) { notice(L"Cannot locate your Windows profile folders."); return 1; }
  swprintf(install_dir,2048,L"%s\\Programs\\Portman",local); GetModuleFileNameW(NULL,self,2048);
  int argc=0; wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);
@@ -205,15 +212,17 @@ int pmi_main(const unsigned char *g,size_t gs,const unsigned char *c,size_t cs,c
  if((argc>1 && !wcscmp(argv[1],L"--uninstall")) || (argc==1 && !_wcsicmp(base,L"Uninstall.exe"))) { LocalFree(argv); int result=uninstall(); CoUninitialize(); return result; }
  LocalFree(argv);
  installer_lock=CreateMutexW(NULL,FALSE,L"Local\\PortmanSetup02"); if(!installer_lock || GetLastError()==ERROR_ALREADY_EXISTS) { notice(L"Another Portman installer is already open."); return 1; }
- background=CreateSolidBrush(RGB(19,24,29)); panel=CreateSolidBrush(RGB(35,43,50)); accent_panel=CreateSolidBrush(RGB(28,38,43));
+ controlfont=CreateFontW(-spx(15),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
+ controlsmall=CreateFontW(-spx(12),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
+ background=CreateSolidBrush(RGB(23,27,32)); panel=CreateSolidBrush(RGB(35,43,50)); accent_panel=CreateSolidBrush(RGB(28,38,43));
  font=CreateFontW(-15,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  smallfont=CreateFontW(-12,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  boldfont=CreateFontW(-15,0,0,0,FW_SEMIBOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  titlefont=CreateFontW(-31,0,0,0,FW_SEMIBOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  mono_font=CreateFontW(-12,0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Consolas");
  WNDCLASSW cls={0}; cls.hInstance=GetModuleHandleW(NULL); cls.lpfnWndProc=proc; cls.lpszClassName=L"PortmanSetup02"; cls.hIcon=LoadIconW(cls.hInstance,MAKEINTRESOURCEW(1)); cls.hCursor=LoadCursorW(NULL,IDC_ARROW); cls.hbrBackground=background; RegisterClassW(&cls);
- window=CreateWindowExW(WS_EX_CONTROLPARENT|WS_EX_APPWINDOW,cls.lpszClassName,L"Install Portman 0.2.2",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,860,660,NULL,NULL,cls.hInstance,NULL); if(!window) return 1;
- ShowWindow(window,SW_SHOW); MSG m;
+ window=CreateWindowExW(WS_EX_CONTROLPARENT|WS_EX_APPWINDOW,cls.lpszClassName,L"Install Portman 0.2.4",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,spx(860),spx(660),NULL,NULL,cls.hInstance,NULL); if(!window) return 1;
+ pm_frame(window); ShowWindow(window,SW_SHOW); MSG m;
  while(GetMessageW(&m,NULL,0,0)>0) { if(!IsDialogMessageW(window,&m)) { TranslateMessage(&m); DispatchMessageW(&m); } }
- DeleteObject(font); DeleteObject(smallfont); DeleteObject(boldfont); DeleteObject(titlefont); DeleteObject(mono_font); DeleteObject(background); DeleteObject(panel); DeleteObject(accent_panel); CloseHandle(installer_lock); CoUninitialize(); return 0;
+ DeleteObject(controlfont); DeleteObject(controlsmall); DeleteObject(font); DeleteObject(smallfont); DeleteObject(boldfont); DeleteObject(titlefont); DeleteObject(mono_font); DeleteObject(background); DeleteObject(panel); DeleteObject(accent_panel); CloseHandle(installer_lock); CoUninitialize(); return 0;
 }

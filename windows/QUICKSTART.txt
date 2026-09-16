@@ -1,4 +1,4 @@
-PORTMAN 0.2.2 - WINDOWS CONTROL PANEL
+PORTMAN 0.2.4 - WINDOWS CONTROL PANEL
 
 1. Open Portman from the Start menu.
 2. Add service: enter a unique name, choose the project folder,

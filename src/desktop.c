@@ -10,13 +10,14 @@
 #include <stdlib.h>
 #include <wchar.h>
 #include "desktop.h"
+#include "ui/theme.h"
 
 #define APPCLASS L"PortmanDesktop02"
 #define TRAYMSG (WM_APP+1)
 enum { ID_LIST=100, ID_ADD, ID_EDIT, ID_REMOVE, ID_IMPORT, ID_START, ID_STOP,
  ID_RESTART, ID_STARTALL, ID_STOPALL, ID_BROWSER, ID_FOLDER, ID_PORTS, ID_LOGS,
  ID_CLEAR, ID_TRAY, ID_LOGIN, ID_OUTPUT, ID_STATUS, ID_OPENLOG, ID_EXPORT,
- ID_NAV_SERVICES, ID_NAV_PORTS, ID_NAV_SETTINGS, ID_NAV_ABOUT };
+ ID_NAV_SERVICES, ID_NAV_PORTS, ID_NAV_SETTINGS, ID_NAV_ABOUT, ID_PAUSE };
 static HWND mainwin, list, output, status, subtitle, title, logtitle, loginbox;
 static HWND settings_title,settings_copy,about_title,about_copy,brand;
 static HINSTANCE instance;
@@ -24,7 +25,8 @@ static HFONT font, boldfont, titlefont, monofont;
 static HBRUSH bgbrush, fieldbrush;
 static COLORREF bg=RGB(23,27,32), field=RGB(31,37,44), fg=RGB(224,231,238), muted=RGB(158,172,187), accent=RGB(90,218,170);
 static int scale=96, selected=-1, previous_count=-1;
-static int page=0;
+static int page=0, log_paused=0, refreshing=0;
+static HIMAGELIST row_height;
 static wchar_t data_dir[2048];
 static NOTIFYICONDATAW tray;
 static HANDLE single;
@@ -63,9 +65,9 @@ static void drawbutton(DRAWITEMSTRUCT *d) {
  COLORREF color=disabled?RGB(37,42,48):primary?accent:nav?RGB(27,33,39):RGB(44,53,62);
  if(!disabled && GetPropW(d->hwndItem,L"PortmanHot")) color=primary?RGB(112,235,188):RGB(57,69,80);
  if(d->itemState & ODS_SELECTED) color=RGB(62,93,83);
- HBRUSH b=CreateSolidBrush(color); FillRect(d->hDC,&d->rcItem,b); DeleteObject(b);
+ FillRect(d->hDC,&d->rcItem,bgbrush); pm_round(d->hDC,d->rcItem,color,px(8));
  SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,disabled?muted:primary?bg:fg);
- SelectObject(d->hDC,font); DrawTextW(d->hDC,text,-1,&d->rcItem,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+ HGDIOBJ old=SelectObject(d->hDC,font); RECT tr=d->rcItem; tr.left+=px(12); tr.right-=px(12); DrawTextW(d->hDC,text,-1,&tr,(nav?DT_LEFT:DT_CENTER)|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX); SelectObject(d->hDC,old);
  if(d->itemState & ODS_FOCUS) { RECT r=d->rcItem; InflateRect(&r,-3,-3); DrawFocusRect(d->hDC,&r); }
 }
 static void column(HWND lv,int n,const wchar_t *s,int width) {
@@ -73,9 +75,49 @@ static void column(HWND lv,int n,const wchar_t *s,int width) {
  ListView_InsertColumn(lv,n,&col);
 }
 static void cell(HWND lv,int row,int col,const wchar_t *s) { ListView_SetItemText(lv,row,col,(LPWSTR)s); }
+static LRESULT CALLBACK table_proc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data) {
+ (void)id; (void)data;
+ if(msg==WM_NOTIFY) {
+  NMHDR *n=(NMHDR*)lp;
+  if(n->hwndFrom==ListView_GetHeader(h) && n->code==NM_CUSTOMDRAW) {
+   NMCUSTOMDRAW *d=(NMCUSTOMDRAW*)lp;
+   if(d->dwDrawStage==CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+   if(d->dwDrawStage==CDDS_ITEMPREPAINT) {
+    FillRect(d->hdc,&d->rc,fieldbrush); wchar_t text[100]; HDITEMW item={0}; item.mask=HDI_TEXT; item.pszText=text; item.cchTextMax=100;
+    Header_GetItem(n->hwndFrom,(int)d->dwItemSpec,&item);
+    RECT r=d->rc; r.left+=px(10); SetBkMode(d->hdc,TRANSPARENT); SetTextColor(d->hdc,muted);
+    HGDIOBJ old=SelectObject(d->hdc,boldfont); DrawTextW(d->hdc,text,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX); SelectObject(d->hdc,old);
+    return CDRF_SKIPDEFAULT;
+   }
+  }
+ }
+ if(msg==WM_NCDESTROY) RemoveWindowSubclass(h,table_proc,1);
+ return DefSubclassProc(h,msg,wp,lp);
+}
+static LRESULT paint_rows(NMLVCUSTOMDRAW *d) {
+ if(d->nmcd.dwDrawStage==CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+ if(d->nmcd.dwDrawStage==CDDS_ITEMPREPAINT) return CDRF_NOTIFYSUBITEMDRAW;
+ if(d->nmcd.dwDrawStage==(CDDS_ITEMPREPAINT|CDDS_SUBITEM)) {
+  int row=(int)d->nmcd.dwItemSpec,col=d->iSubItem;
+  RECT r; ListView_GetSubItemRect(d->nmcd.hdr.hwndFrom,row,col,LVIR_BOUNDS,&r);
+  if(col==0) r.right=r.left+ListView_GetColumnWidth(d->nmcd.hdr.hwndFrom,0);
+  int selected=ListView_GetItemState(d->nmcd.hdr.hwndFrom,row,LVIS_SELECTED)!=0;
+  HBRUSH b=CreateSolidBrush(selected?RGB(39,65,60):(row%2?RGB(28,34,40):RGB(31,37,44))); FillRect(d->nmcd.hdc,&r,b); DeleteObject(b);
+  wchar_t text[2048]; ListView_GetItemText(d->nmcd.hdr.hwndFrom,row,col,text,2048);
+  COLORREF color=fg;
+  if(d->nmcd.hdr.hwndFrom==list && col==1) { pmd_service svc; if(pmd_get(row,&svc)) color=svc.state==2||svc.state==3?accent:svc.state==4?RGB(255,142,142):svc.state==1||svc.state==5?RGB(244,196,113):muted; }
+  r.left+=px(10); r.right-=px(8); SetBkMode(d->nmcd.hdc,TRANSPARENT); SetTextColor(d->nmcd.hdc,color);
+  HGDIOBJ old=SelectObject(d->nmcd.hdc,col==0?boldfont:font); DrawTextW(d->nmcd.hdc,text,-1,&r,DT_LEFT|DT_VCENTER|DT_SINGLELINE|DT_END_ELLIPSIS|DT_NOPREFIX); SelectObject(d->nmcd.hdc,old);
+  if(selected && GetFocus()==d->nmcd.hdr.hwndFrom) { RECT fr=r; InflateRect(&fr,-1,-2); DrawFocusRect(d->nmcd.hdc,&fr); }
+  return CDRF_SKIPDEFAULT;
+ }
+ return CDRF_DODEFAULT;
+}
 static HWND table(HWND h,int id) {
  HWND lv=control(h,WC_LISTVIEWW,L"",WS_TABSTOP|WS_BORDER|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,id,0,0,0,0);
  ListView_SetExtendedListViewStyle(lv,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);
+ SetWindowTheme(lv,L"",L""); SetWindowTheme(ListView_GetHeader(lv),L"",L"");
+ SetWindowSubclass(lv,table_proc,1,0); ListView_SetImageList(lv,row_height,LVSIL_SMALL);
  ListView_SetBkColor(lv,field); ListView_SetTextBkColor(lv,field); ListView_SetTextColor(lv,fg);
  return lv;
 }
@@ -88,12 +130,12 @@ static void openpath(HWND h,const wchar_t *path) {
  if((INT_PTR)rc<=32) errorbox(h,"Windows could not open this location or application.");
 }
 static void refresh(void) {
- int n=pmd_count(), i;
+ refreshing=1; int n=pmd_count(), i;
  SendMessageW(list,WM_SETREDRAW,FALSE,0);
  if(previous_count!=n) {
    int was=current(); ListView_DeleteAllItems(list);
    for(i=0;i<n;i++) { LVITEMW item={0}; item.mask=LVIF_TEXT; item.iItem=i; item.pszText=L""; ListView_InsertItem(list,&item); }
-   previous_count=n; selectrow(was<n?was:n-1);
+   previous_count=n; selectrow(was>=0 && was<n?was:(n?0:-1));
  }
  for(i=0;i<n;i++) {
   pmd_service s; wchar_t w[2048]; pmd_get(i,&s);
@@ -102,7 +144,7 @@ static void refresh(void) {
   cell(list,i,1,states[s.state>=0 && s.state<6?s.state:4]);
   if(s.port) swprintf(w,2048,L"%u",s.port); else wcscpy(w,L"--"); cell(list,i,2,w);
   if(s.pid) swprintf(w,2048,L"%u",s.pid); else wcscpy(w,L"--"); cell(list,i,3,w);
-  if(s.pid) swprintf(w,2048,L"%02llu:%02llu:%02llu",s.elapsed/3600,(s.elapsed/60)%60,s.elapsed%60); else swprintf(w,2048,L"exit %d",s.exit_code); cell(list,i,4,w);
+  if(s.pid) swprintf(w,2048,L"%02llu:%02llu:%02llu",s.elapsed/3600,(s.elapsed/60)%60,s.elapsed%60); else wcscpy(w,L"--"); cell(list,i,4,w);
   to_w(s.command,w,2048); cell(list,i,5,w);
  }
  SendMessageW(list,WM_SETREDRAW,TRUE,0); InvalidateRect(list,NULL,FALSE);
@@ -113,15 +155,17 @@ static void refresh(void) {
  EnableWindow(GetDlgItem(mainwin,ID_BROWSER),exists && s.port && s.state==2);
  EnableWindow(GetDlgItem(mainwin,ID_FOLDER),exists); EnableWindow(GetDlgItem(mainwin,ID_CLEAR),exists && !active);
  EnableWindow(GetDlgItem(mainwin,ID_OPENLOG),exists); EnableWindow(GetDlgItem(mainwin,ID_EXPORT),n>0);
- wchar_t w[240]; swprintf(w,240,L"%d services   /   %d active     |     Windows local development",n,pmd_running()); SetWindowTextW(subtitle,w);
+ wchar_t w[240]; swprintf(w,240,L"%d services   /   %d active     |     Windows local development",n,pmd_running()); if(page==0) SetWindowTextW(subtitle,w);
  if(exists) {
   wchar_t cwd[2048]; to_w(s.cwd,cwd,2048);
   const wchar_t *tip=s.state==5?L"Process alive; expected TCP port missing, unknown or owned by another process.":s.state==1?L"Waiting for the configured TCP port. Check the command if this takes too long.":cwd;
   SetWindowTextW(status,tip);
- } else SetWindowTextW(status,L"Start here: Add service, choose your project folder, then enter its start command.");
+ } else SetWindowTextW(status,L"Add your first service to get started.");
+ refreshing=0;
 }
 /* Display a bounded log tail; strip common ANSI CSI sequences and normalize LF for native edit. */
 static void refreshlog(void) {
+ if(log_paused) return;
  static wchar_t previous[100000]; char buf[32000]; wchar_t decoded[34000], shown[68000];
  int i=current(); pmd_service s; wchar_t titletext[160];
  if(pmd_get(i,&s)) { wchar_t name[80]; to_w(s.name,name,80); swprintf(titletext,160,L"OUTPUT / %s    (latest 32 KB)",name); }
@@ -141,34 +185,43 @@ static void refreshlog(void) {
 static void layout(void) {
  RECT r; GetClientRect(mainwin,&r); int w=MulDiv(r.right,96,scale),h=MulDiv(r.bottom,96,scale);
  int left=204,cw=w-left-24;
- move(title,left,19,cw-140,33); move(subtitle,left,58,cw-120,22);
- move(GetDlgItem(mainwin,ID_TRAY),w-138,26,112,32);
- move(GetDlgItem(mainwin,ID_NAV_SERVICES),18,112,162,38); move(GetDlgItem(mainwin,ID_NAV_PORTS),18,158,162,38);
- move(GetDlgItem(mainwin,ID_NAV_SETTINGS),18,204,162,38); move(GetDlgItem(mainwin,ID_NAV_ABOUT),18,250,162,38);
- move(brand,18,h-72,162,48);
- move(GetDlgItem(mainwin,ID_ADD),left,102,124,32); move(GetDlgItem(mainwin,ID_IMPORT),left+134,102,134,32);
- move(GetDlgItem(mainwin,ID_EDIT),left+278,102,78,32); move(GetDlgItem(mainwin,ID_REMOVE),left+366,102,88,32);
- move(GetDlgItem(mainwin,ID_EXPORT),left+464,102,110,32);
- move(GetDlgItem(mainwin,ID_STARTALL),w-242,102,104,32); move(GetDlgItem(mainwin,ID_STOPALL),w-128,102,104,32);
- int lh=(h-340)/2; if(lh<130) lh=130;
- move(list,left,149,cw,lh);
- int y=160+lh;
- int ids[]={ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG}; int widths[]={92,92,100,122,116,100};
- int x=left; for(int i=0;i<6;i++) { move(GetDlgItem(mainwin,ids[i]),x,y,widths[i],32); x+=widths[i]+10; }
- move(status,left+1,y+42,cw-2,32); move(logtitle,left+1,y+78,cw-176,24);
- move(GetDlgItem(mainwin,ID_CLEAR),w-124,y+71,100,28);
- move(output,left,y+105,cw,h-y-129);
- move(settings_title,left,116,cw,38); move(settings_copy,left,169,cw,70);
- move(loginbox,left,255,310,30); move(GetDlgItem(mainwin,ID_LOGS),left,303,140,34);
- move(about_title,left,116,cw,38); move(about_copy,left,174,cw,150);
- ListView_SetColumnWidth(list,5,px(cw-514));
+ move(title,left,24,cw-140,36); move(subtitle,left,68,cw-120,25);
+ move(GetDlgItem(mainwin,ID_TRAY),w-138,28,112,34);
+ int nav[]={ID_NAV_SERVICES,ID_NAV_PORTS,ID_NAV_SETTINGS,ID_NAV_ABOUT};
+ for(int i=0;i<4;i++) move(GetDlgItem(mainwin,nav[i]),18,116+i*48,162,40);
+ move(brand,18,h-72,166,52);
+ move(GetDlgItem(mainwin,ID_ADD),left,116,140,36);
+ move(GetDlgItem(mainwin,ID_IMPORT),left+150,116,140,36);
+ move(GetDlgItem(mainwin,ID_EXPORT),left+300,116,124,36);
+ move(GetDlgItem(mainwin,ID_STARTALL),w-242,116,104,36);
+ move(GetDlgItem(mainwin,ID_STOPALL),w-128,116,104,36);
+ int lh=(h-380)/2; if(lh<140) lh=140; if(lh>270) lh=270;
+ move(list,left,168,cw,lh);
+ int y=182+lh;
+ int ids[]={ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_EDIT,ID_REMOVE};
+ int widths[]={88,88,96,120,116,100,72,84};
+ int x=left; for(int i=0;i<8;i++) {
+  if(x+widths[i]>left+cw) {x=left;y+=44;}
+  move(GetDlgItem(mainwin,ids[i]),x,y,widths[i],34); x+=widths[i]+8;
+ }
+ move(status,left,y+44,cw,30);
+ move(logtitle,left,y+88,cw-260,24);
+ move(GetDlgItem(mainwin,ID_PAUSE),w-254,y+80,120,32);
+ move(GetDlgItem(mainwin,ID_CLEAR),w-124,y+80,100,32);
+ move(output,left,y+120,cw,h-y-144);
+ RECT er; GetClientRect(output,&er); InflateRect(&er,-px(12),-px(10)); SendMessageW(output,EM_SETRECT,0,(LPARAM)&er);
+ move(settings_title,left,128,cw,38); move(settings_copy,left,186,cw,70);
+ move(loginbox,left,280,340,36); move(GetDlgItem(mainwin,ID_LOGS),left,334,140,36);
+ move(about_title,left,128,cw,38); move(about_copy,left,186,cw,190);
+ ListView_SetColumnWidth(list,5,px(cw-530));
+ InvalidateRect(mainwin,NULL,FALSE);
 }
 
 static void show_page(int next) {
  page=next;
- int service_ids[]={ID_ADD,ID_IMPORT,ID_EDIT,ID_REMOVE,ID_EXPORT,ID_STARTALL,ID_STOPALL,ID_LIST,ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_STATUS,ID_CLEAR,ID_OUTPUT};
+ int service_ids[]={ID_ADD,ID_IMPORT,ID_EDIT,ID_REMOVE,ID_EXPORT,ID_STARTALL,ID_STOPALL,ID_LIST,ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_STATUS,ID_CLEAR,ID_OUTPUT,ID_PAUSE};
  for(unsigned i=0;i<sizeof(service_ids)/sizeof(service_ids[0]);i++) ShowWindow(GetDlgItem(mainwin,service_ids[i]),page==0?SW_SHOW:SW_HIDE);
- ShowWindow(logtitle,page==0?SW_SHOW:SW_HIDE);
+ ShowWindow(logtitle,page==0?SW_SHOW:SW_HIDE); ShowWindow(status,page==0?SW_SHOW:SW_HIDE);
  ShowWindow(settings_title,page==2?SW_SHOW:SW_HIDE); ShowWindow(settings_copy,page==2?SW_SHOW:SW_HIDE);
  ShowWindow(loginbox,page==2?SW_SHOW:SW_HIDE); ShowWindow(GetDlgItem(mainwin,ID_LOGS),page==2?SW_SHOW:SW_HIDE);
  ShowWindow(about_title,page==3?SW_SHOW:SW_HIDE); ShowWindow(about_copy,page==3?SW_SHOW:SW_HIDE);
@@ -190,7 +243,7 @@ static void set_login(void) {
   if(enabled) { wchar_t exe[2048],cmd[2100]; GetModuleFileNameW(NULL,exe,2048); swprintf(cmd,2100,L"\"%s\"",exe); r=RegSetValueExW(key,L"Portman",0,REG_SZ,(BYTE*)cmd,(DWORD)((wcslen(cmd)+1)*sizeof(wchar_t))); }
   else { r=RegDeleteValueW(key,L"Portman"); if(r==ERROR_FILE_NOT_FOUND) r=ERROR_SUCCESS; } RegCloseKey(key);
  }
- if(r!=ERROR_SUCCESS) { errorbox(mainwin,"Could not update startup setting."); SendMessageW(loginbox,BM_SETCHECK,login_enabled()?BST_CHECKED:BST_UNCHECKED,0); }
+ if(r!=ERROR_SUCCESS) { errorbox(mainwin,"Could not update startup setting."); SendMessageW(loginbox,BM_SETCHECK,login_enabled()?BST_CHECKED:BST_UNCHECKED,0); SetWindowSubclass(loginbox,pm_check,1,0); }
 }
 
 /* Service editor, using actual commands instead of silently rewriting framework options. */
@@ -215,7 +268,7 @@ static LRESULT CALLBACK EditorProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  case WM_CREATE: {
   label(h,L"SERVICE DETAILS",24,20,540,24);
   label(h,L"Template",24,59,100,22);
-  e_template=control(h,L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,E_TEMPLATE,145,53,418,200);
+  e_template=control(h,L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|CBS_OWNERDRAWFIXED|CBS_HASSTRINGS|WS_VSCROLL,E_TEMPLATE,145,53,418,200);
   for(int i=0;i<6;i++) SendMessageW(e_template,CB_ADDSTRING,0,(LPARAM)templates[i]); SendMessageW(e_template,CB_SETCURSEL,0,0);
   label(h,L"Name",24,104,108,22); e_name=edit(h,E_NAME,145,98,418,64);
   label(h,L"Project folder",24,149,120,22); e_cwd=edit(h,E_CWD,145,143,326,1800); button(h,L"Browse",E_BROWSE,479,142,84);
@@ -236,7 +289,13 @@ static LRESULT CALLBACK EditorProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
   } return 0;
  case WM_CLOSE: DestroyWindow(h); return 0;
  case WM_DESTROY: modal_done=1; return 0;
- case WM_DRAWITEM: drawbutton((DRAWITEMSTRUCT*)lp); return TRUE;
+ case WM_MEASUREITEM: if(((MEASUREITEMSTRUCT*)lp)->CtlType==ODT_COMBOBOX) { ((MEASUREITEMSTRUCT*)lp)->itemHeight=px(28); return TRUE; } break;
+ case WM_DRAWITEM: {
+  DRAWITEMSTRUCT *d=(DRAWITEMSTRUCT*)lp;
+  if(d->CtlType==ODT_COMBOBOX) {
+   FillRect(d->hDC,&d->rcItem,fieldbrush); if(d->itemID!=(UINT)-1) { wchar_t text[100]; SendMessageW(d->hwndItem,CB_GETLBTEXT,d->itemID,(LPARAM)text); RECT r=d->rcItem;r.left+=px(8); SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,fg); HGDIOBJ old=SelectObject(d->hDC,font);DrawTextW(d->hDC,text,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);SelectObject(d->hDC,old);if(d->itemState&ODS_FOCUS)DrawFocusRect(d->hDC,&r); } return TRUE;
+  } drawbutton(d); return TRUE;
+ }
  case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX: case WM_CTLCOLORBTN: return colors(msg,wp);
  } return DefWindowProcW(h,msg,wp,lp);
 }
@@ -246,7 +305,7 @@ static void edit_service(int i) {
  RECT r; GetWindowRect(mainwin,&r);
  editor=CreateWindowExW(WS_EX_DLGMODALFRAME,L"PortmanServiceEditor",i<0?L"Add service":L"Edit service",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,r.left+px(60),r.top+px(40),px(604),px(487),mainwin,NULL,instance,NULL);
  if(!editor) { EnableWindow(mainwin,TRUE); return; }
- ShowWindow(editor,SW_SHOW);
+ pm_frame(editor); ShowWindow(editor,SW_SHOW);
  MSG m; while(!modal_done && GetMessageW(&m,NULL,0,0)>0) { if(m.message==WM_KEYDOWN && m.wParam==VK_ESCAPE) DestroyWindow(editor); else if(m.message==WM_KEYDOWN && m.wParam==VK_RETURN) save_editor(editor); else if(!IsDialogMessageW(editor,&m)) { TranslateMessage(&m); DispatchMessageW(&m); } }
  EnableWindow(mainwin,TRUE); SetForegroundWindow(mainwin); refresh(); if(i<0) selectrow(pmd_count()-1); refreshlog();
 }
@@ -300,15 +359,22 @@ static LRESULT CALLBACK PortsProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  switch(msg) {
  case WM_CREATE: portlist=table(h,700); column(portlist,0,L"Port",66); column(portlist,1,L"PID",74); column(portlist,2,L"Process",175); column(portlist,3,L"Address",170); column(portlist,4,L"Executable",380); portstatus=label(h,L"",20,12,760,26); button(h,L"Refresh",701,20,422,100); portsearch=edit(h,702,20,49,800,255); SendMessageW(portsearch,EM_SETCUEBANNER,TRUE,(LPARAM)L"Search port, PID, process, address or path..."); refresh_ports(); return 0;
  case WM_SIZE: { RECT r; GetClientRect(h,&r); int w=MulDiv(r.right,96,scale),ht=MulDiv(r.bottom,96,scale); move(portlist,20,91,w-40,ht-155); move(portsearch,20,49,w-40,29); move(GetDlgItem(h,701),20,ht-49,100,32); move(portstatus,20,16,w-40,24); return 0; }
+ case WM_NOTIFY: if(((NMHDR*)lp)->hwndFrom==portlist && ((NMHDR*)lp)->code==NM_CUSTOMDRAW) return paint_rows((NMLVCUSTOMDRAW*)lp); return 0;
  case WM_COMMAND: if(LOWORD(wp)==701) refresh_ports(); if(LOWORD(wp)==702 && HIWORD(wp)==EN_CHANGE) render_ports(); return 0;
  case WM_DESTROY: free(portrows); portrows=NULL; portcount=-1; portswin=NULL; return 0;
- case WM_DRAWITEM: drawbutton((DRAWITEMSTRUCT*)lp); return TRUE;
+ case WM_MEASUREITEM: if(((MEASUREITEMSTRUCT*)lp)->CtlType==ODT_COMBOBOX) { ((MEASUREITEMSTRUCT*)lp)->itemHeight=px(28); return TRUE; } break;
+ case WM_DRAWITEM: {
+  DRAWITEMSTRUCT *d=(DRAWITEMSTRUCT*)lp;
+  if(d->CtlType==ODT_COMBOBOX) {
+   FillRect(d->hDC,&d->rcItem,fieldbrush); if(d->itemID!=(UINT)-1) { wchar_t text[100]; SendMessageW(d->hwndItem,CB_GETLBTEXT,d->itemID,(LPARAM)text); RECT r=d->rcItem;r.left+=px(8); SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,fg); HGDIOBJ old=SelectObject(d->hDC,font);DrawTextW(d->hDC,text,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);SelectObject(d->hDC,old);if(d->itemState&ODS_FOCUS)DrawFocusRect(d->hDC,&r); } return TRUE;
+  } drawbutton(d); return TRUE;
+ }
  case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: case WM_CTLCOLORBTN: return colors(msg,wp);
  } return DefWindowProcW(h,msg,wp,lp);
 }
 static void show_ports(void) {
  if(portswin) { SetForegroundWindow(portswin); return; }
- portswin=CreateWindowExW(0,L"PortmanPorts",L"Port inspector - TCP listeners",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(940),px(520),mainwin,NULL,instance,NULL); ShowWindow(portswin,SW_SHOW);
+ portswin=CreateWindowExW(0,L"PortmanPorts",L"Port inspector - TCP listeners",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(940),px(520),mainwin,NULL,instance,NULL); pm_frame(portswin); ShowWindow(portswin,SW_SHOW);
 }
 static void do_action(int id) {
  int i=current(); pmd_service s; wchar_t w[4096]; char path[8192];
@@ -335,6 +401,7 @@ static void do_action(int id) {
  case ID_NAV_ABOUT: show_page(3); break;
  case ID_TRAY: hide_tray(); break;
  case ID_LOGIN: set_login(); break;
+ case ID_PAUSE: log_paused=!log_paused; SetWindowTextW(GetDlgItem(mainwin,ID_PAUSE),log_paused?L"Resume output":L"Pause output"); break;
  }
  refresh(); refreshlog();
 }
@@ -357,24 +424,30 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
   list=table(h,ID_LIST); column(list,0,L"Service",156); column(list,1,L"Status",118); column(list,2,L"Port",65); column(list,3,L"PID",75); column(list,4,L"Uptime",100); column(list,5,L"Command",340);
   button(h,L"Start",ID_START,0,0,92); button(h,L"Stop",ID_STOP,0,0,92); button(h,L"Restart",ID_RESTART,0,0,100); button(h,L"Open browser",ID_BROWSER,0,0,122); button(h,L"Project folder",ID_FOLDER,0,0,116); button(h,L"Open log",ID_OPENLOG,0,0,100);
   status=label(h,L"",24,0,860,32); logtitle=label(h,L"OUTPUT",24,0,680,24); SendMessageW(logtitle,WM_SETFONT,(WPARAM)boldfont,TRUE);
-  button(h,L"Clear log",ID_CLEAR,0,0,100);
-  output=control(h,L"EDIT",L"",WS_TABSTOP|WS_BORDER|WS_VSCROLL|WS_HSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|ES_AUTOHSCROLL,ID_OUTPUT,0,0,0,0); SendMessageW(output,WM_SETFONT,(WPARAM)monofont,TRUE); SendMessageW(output,EM_SETLIMITTEXT,100000,0);
-  loginbox=control(h,L"BUTTON",L"Open Portman at sign-in",WS_TABSTOP|BS_AUTOCHECKBOX,ID_LOGIN,0,0,245,25); SendMessageW(loginbox,BM_SETCHECK,login_enabled()?BST_CHECKED:BST_UNCHECKED,0);
+  button(h,L"Clear log",ID_CLEAR,0,0,100); button(h,L"Pause output",ID_PAUSE,0,0,120);
+  output=control(h,L"EDIT",L"",WS_TABSTOP|WS_VSCROLL|ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL,ID_OUTPUT,0,0,0,0); SendMessageW(output,WM_SETFONT,(WPARAM)monofont,TRUE); SendMessageW(output,EM_SETLIMITTEXT,100000,0);
+  loginbox=control(h,L"BUTTON",L"Open Portman at sign-in",WS_TABSTOP|BS_AUTOCHECKBOX,ID_LOGIN,0,0,245,25); SendMessageW(loginbox,BM_SETCHECK,login_enabled()?BST_CHECKED:BST_UNCHECKED,0); SetWindowSubclass(loginbox,pm_check,1,0);
   button(h,L"Logs folder",ID_LOGS,0,0,122);
   settings_title=label(h,L"Windows preferences",0,0,500,38); SendMessageW(settings_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
   settings_copy=label(h,L"STARTUP\nOpen the control panel when you sign in. Services never start automatically.",0,0,700,70);
   about_title=label(h,L"Local development, under control.",0,0,700,38); SendMessageW(about_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
-  about_copy=label(h,L"Portman 0.2.2\n\nNative Win32 interface. Zig service engine. No browser, Electron, .NET, Node.js, or administrator access required.\n\nBuilt with \u2665 by rakarmp (rezz990)",0,0,700,150);
+  about_copy=label(h,L"Portman 0.2.4\n\nNative Win32 interface. Zig service engine. No browser, Electron, .NET, Node.js, or administrator access required.\n\nBuilt with \u2665 by rakarmp (rezz990)",0,0,700,150);
   tray.cbSize=sizeof(tray); tray.hWnd=h; tray.uID=1; tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP; tray.uCallbackMessage=TRAYMSG; tray.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1)); wcscpy(tray.szTip,L"Portman - double-click to open");
   if(!Shell_NotifyIconW(NIM_ADD,&tray)) EnableWindow(GetDlgItem(h,ID_TRAY),FALSE);
   SetTimer(h,1,1500,NULL); refresh(); refreshlog(); show_page(0); return 0;
  }
  case WM_SIZE: layout(); return 0;
- case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize.x=px(900); ((MINMAXINFO*)lp)->ptMinTrackSize.y=px(690); return 0;
+ case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize.x=px(960); ((MINMAXINFO*)lp)->ptMinTrackSize.y=px(780); return 0;
  case WM_COMMAND: do_action(LOWORD(wp)); return 0;
  case WM_TIMER: pmd_tick(); refresh(); refreshlog(); return 0;
- case WM_NOTIFY: { NMHDR *n=(NMHDR*)lp; if(n->hwndFrom==list && n->code==LVN_ITEMCHANGED && current()!=selected) { selected=current(); refreshlog(); } if(n->hwndFrom==list && n->code==NM_DBLCLK && current()>=0) do_action(ID_EDIT); return 0; }
- case WM_DRAWITEM: drawbutton((DRAWITEMSTRUCT*)lp); return TRUE;
+ case WM_NOTIFY: { NMHDR *n=(NMHDR*)lp; if(n->hwndFrom==list && n->code==NM_CUSTOMDRAW) return paint_rows((NMLVCUSTOMDRAW*)lp); if(n->hwndFrom==list && n->code==LVN_ITEMCHANGED && !refreshing && current()!=selected) { selected=current(); log_paused=0; SetWindowTextW(GetDlgItem(h,ID_PAUSE),L"Pause output"); refresh(); refreshlog(); } if(n->hwndFrom==list && n->code==NM_DBLCLK && current()>=0) do_action(ID_EDIT); return 0; }
+ case WM_MEASUREITEM: if(((MEASUREITEMSTRUCT*)lp)->CtlType==ODT_COMBOBOX) { ((MEASUREITEMSTRUCT*)lp)->itemHeight=px(28); return TRUE; } break;
+ case WM_DRAWITEM: {
+  DRAWITEMSTRUCT *d=(DRAWITEMSTRUCT*)lp;
+  if(d->CtlType==ODT_COMBOBOX) {
+   FillRect(d->hDC,&d->rcItem,fieldbrush); if(d->itemID!=(UINT)-1) { wchar_t text[100]; SendMessageW(d->hwndItem,CB_GETLBTEXT,d->itemID,(LPARAM)text); RECT r=d->rcItem;r.left+=px(8); SetBkMode(d->hDC,TRANSPARENT); SetTextColor(d->hDC,fg); HGDIOBJ old=SelectObject(d->hDC,font);DrawTextW(d->hDC,text,-1,&r,DT_SINGLELINE|DT_VCENTER|DT_NOPREFIX);SelectObject(d->hDC,old);if(d->itemState&ODS_FOCUS)DrawFocusRect(d->hDC,&r); } return TRUE;
+  } drawbutton(d); return TRUE;
+ }
  case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: case WM_CTLCOLORBTN: return colors(msg,wp);
  case TRAYMSG:
   if(lp==WM_LBUTTONDBLCLK) { ShowWindow(h,SW_RESTORE); SetForegroundWindow(h); }
@@ -398,6 +471,7 @@ int pm_desktop_main(void) {
  wchar_t local[MAX_PATH]; if(FAILED(SHGetFolderPathW(NULL,CSIDL_LOCAL_APPDATA,NULL,SHGFP_TYPE_CURRENT,local))) { errorbox(NULL,"Cannot locate Local AppData."); return 1; }
  swprintf(data_dir,2048,L"%s\\Portman",local); char utf[8192]; to_u(data_dir,utf,sizeof(utf));
  if(!pmd_init(utf)) { backend_error(NULL); MessageBoxW(NULL,L"Configuration could not be loaded. Portman has not overwritten it.\nCheck services.toml in your Local AppData / Portman folder.",L"Portman",MB_OK); return 1; }
+ row_height=ImageList_Create(1,px(40),ILC_COLOR32,1,1);
  bgbrush=CreateSolidBrush(bg); fieldbrush=CreateSolidBrush(field);
  font=CreateFontW(-px(14),0,0,0,FW_NORMAL,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
  boldfont=CreateFontW(-px(13),0,0,0,FW_SEMIBOLD,0,0,0,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
@@ -406,9 +480,10 @@ int pm_desktop_main(void) {
  WNDCLASSEXW cls={0}; cls.cbSize=sizeof(cls); cls.hInstance=instance; cls.hCursor=LoadCursorW(NULL,IDC_ARROW); cls.hbrBackground=bgbrush; cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1)); cls.lpfnWndProc=MainProc; cls.lpszClassName=APPCLASS; RegisterClassExW(&cls);
  cls.lpfnWndProc=EditorProc; cls.lpszClassName=L"PortmanServiceEditor"; RegisterClassExW(&cls);
  cls.lpfnWndProc=PortsProc; cls.lpszClassName=L"PortmanPorts"; RegisterClassExW(&cls);
- mainwin=CreateWindowExW(WS_EX_CONTROLPARENT,APPCLASS,L"Portman 0.2.2 - Windows Control Panel",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(1080),px(780),NULL,NULL,instance,NULL);
+ mainwin=CreateWindowExW(WS_EX_CONTROLPARENT,APPCLASS,L"Portman 0.2.4 - Windows Control Panel",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(1180),px(860),NULL,NULL,instance,NULL);
  if(!mainwin) { pmd_shutdown(); return 1; }
+ pm_frame(mainwin);
  ShowWindow(mainwin,SW_SHOW); UpdateWindow(mainwin);
  MSG m; while(GetMessageW(&m,NULL,0,0)>0) { if(!IsDialogMessageW(mainwin,&m)) { TranslateMessage(&m); DispatchMessageW(&m); } }
- DeleteObject(font); DeleteObject(boldfont); DeleteObject(titlefont); DeleteObject(monofont); DeleteObject(bgbrush); DeleteObject(fieldbrush); CloseHandle(single); CoUninitialize(); return 0;
+ ImageList_Destroy(row_height); DeleteObject(font); DeleteObject(boldfont); DeleteObject(titlefont); DeleteObject(monofont); DeleteObject(bgbrush); DeleteObject(fieldbrush); CloseHandle(single); CoUninitialize(); return 0;
 }

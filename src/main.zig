@@ -8,7 +8,7 @@ const windows = builtin.os.tag == .windows;
 const out = std.io.getStdOut;
 const err = std.io.getStdErr;
 const help =
-    \\Portman 0.2.2 - local development service manager
+    \\Portman 0.2.4 - local development service manager
     \\
     \\  portman [list] [--json] [--port PORT]
     \\  portman inspect PORT [--json]
@@ -337,7 +337,7 @@ fn run(a: std.mem.Allocator, args: []const [:0]u8) !void {
         try out().writeAll(help);
     } else if (same(cmd, "--version")) {
         if (rest.len != 0) return error.UnknownOption;
-        try out().writeAll("portman 0.2.2\n");
+        try out().writeAll("portman 0.2.4\n");
     } else if (same(cmd, "list") or same(cmd, "inspect") or same(cmd, "watch")) try listCommand(a, rest, cmd) else if (same(cmd, "kill") or same(cmd, "free")) try killCommand(a, rest) else if (same(cmd, "logs")) try logs(a, rest) else if (same(cmd, "init")) {
         if (rest.len != 0) return error.UnknownOption;
         var file = try std.fs.cwd().createFile("dev.toml", .{ .exclusive = true });

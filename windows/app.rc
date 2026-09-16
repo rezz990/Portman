@@ -1,8 +1,8 @@
 1 ICON "portman.ico"
 1 24 "app.manifest"
 1 VERSIONINFO
- FILEVERSION 0,2,2,0
- PRODUCTVERSION 0,2,2,0
+ FILEVERSION 0,2,4,0
+ PRODUCTVERSION 0,2,4,0
  FILEOS 0x40004
  FILETYPE 0x1
  BEGIN
@@ -11,9 +11,9 @@
    BLOCK "040904B0"
    BEGIN
     VALUE "FileDescription", "Portman Windows Control Panel\0"
-    VALUE "FileVersion", "0.2.2\0"
+    VALUE "FileVersion", "0.2.4\0"
     VALUE "ProductName", "Portman\0"
-    VALUE "ProductVersion", "0.2.2\0"
+    VALUE "ProductVersion", "0.2.4\0"
    END
   END
   BLOCK "VarFileInfo"

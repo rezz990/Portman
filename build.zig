@@ -15,16 +15,16 @@ pub fn build(b: *std.Build) void {
         gui.addWin32ResourceFile(.{ .file = b.path("windows/app.rc"), .include_paths = &.{b.path("windows")} });
         gui.addCSourceFiles(.{ .files = &.{ "src/platform.c", "src/desktop.c" }, .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
         gui.linkLibC();
-        for ([_][]const u8{ "iphlpapi", "ws2_32", "user32", "gdi32", "comctl32", "comdlg32", "shell32", "ole32", "advapi32" }) |lib| gui.linkSystemLibrary(lib);
+        for ([_][]const u8{ "iphlpapi", "ws2_32", "user32", "gdi32", "comctl32", "comdlg32", "shell32", "ole32", "advapi32", "uxtheme", "dwmapi" }) |lib| gui.linkSystemLibrary(lib);
         b.installArtifact(gui);
         if (b.option(bool, "setup", "Build installer after preparing windows/payload") orelse false) {
-            const setup = b.addExecutable(.{ .name = "Portman-Setup-0.2.2", .root_source_file = b.path("windows/setup.zig"), .target = target, .optimize = optimize });
+            const setup = b.addExecutable(.{ .name = "Portman-Setup-0.2.4", .root_source_file = b.path("windows/setup.zig"), .target = target, .optimize = optimize });
             setup.subsystem = .Windows;
             setup.addIncludePath(b.path("windows"));
             setup.addCSourceFile(.{ .file = b.path("windows/setup.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
             setup.addWin32ResourceFile(.{ .file = b.path("windows/app.rc"), .include_paths = &.{b.path("windows")} });
             setup.linkLibC();
-            for ([_][]const u8{ "user32", "gdi32", "shell32", "ole32", "advapi32", "uuid" }) |lib| setup.linkSystemLibrary(lib);
+            for ([_][]const u8{ "user32", "gdi32", "shell32", "ole32", "advapi32", "uuid", "comctl32", "uxtheme", "dwmapi" }) |lib| setup.linkSystemLibrary(lib);
             b.installArtifact(setup);
         }
     }
