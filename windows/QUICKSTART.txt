@@ -1,4 +1,4 @@
-PORTMAN 0.2.4 - WINDOWS CONTROL PANEL
+PORTMAN 0.2.6 - WINDOWS CONTROL PANEL
 
 1. Open Portman from the Start menu.
 2. Add service: enter a unique name, choose the project folder,
@@ -27,3 +27,9 @@ No automatic restart after crashes. Port inspection is TCP only.
 Installer is unsigned. Native Windows acceptance testing remains required.
 Uninstall via Windows Settings > Apps > Portman, or Uninstall.exe --uninstall.
 Uninstall keeps settings, logs and all project folders.
+
+UPDATING
+Run the new installer; existing installs offer Update / repair. No uninstall first.
+If blocked, use the exact Windows error and Retry / Cancel. Setup log records it.
+Data stays separate from application files. File rollback is best-effort; retained
+backups are shown if recovery fails. In-app update download is not included yet.

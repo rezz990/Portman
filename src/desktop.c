@@ -11,6 +11,7 @@
 #include <wchar.h>
 #include "desktop.h"
 #include "ui/theme.h"
+#include "ui/maintenance.h"
 
 #define APPCLASS L"PortmanDesktop02"
 #define TRAYMSG (WM_APP+1)
@@ -20,6 +21,8 @@ enum { ID_LIST=100, ID_ADD, ID_EDIT, ID_REMOVE, ID_IMPORT, ID_START, ID_STOP,
  ID_NAV_SERVICES, ID_NAV_PORTS, ID_NAV_SETTINGS, ID_NAV_ABOUT, ID_PAUSE };
 static HWND mainwin, list, output, status, subtitle, title, logtitle, loginbox;
 static HWND settings_title,settings_copy,about_title,about_copy,brand;
+static HWND portswin,portlist,portstatus,portsearch;
+static void show_ports(void);
 static HINSTANCE instance;
 static HFONT font, boldfont, titlefont, monofont;
 static HBRUSH bgbrush, fieldbrush;
@@ -155,11 +158,14 @@ static void refresh(void) {
  EnableWindow(GetDlgItem(mainwin,ID_BROWSER),exists && s.port && s.state==2);
  EnableWindow(GetDlgItem(mainwin,ID_FOLDER),exists); EnableWindow(GetDlgItem(mainwin,ID_CLEAR),exists && !active);
  EnableWindow(GetDlgItem(mainwin,ID_OPENLOG),exists); EnableWindow(GetDlgItem(mainwin,ID_EXPORT),n>0);
+ EnableWindow(GetDlgItem(mainwin,ID_STARTALL),n>pmd_running());
+ EnableWindow(GetDlgItem(mainwin,ID_STOPALL),pmd_running()>0);
  wchar_t w[240]; swprintf(w,240,L"%d services   /   %d active     |     Windows local development",n,pmd_running()); if(page==0) SetWindowTextW(subtitle,w);
  if(exists) {
   wchar_t cwd[2048]; to_w(s.cwd,cwd,2048);
   const wchar_t *tip=s.state==5?L"Process alive; expected TCP port missing, unknown or owned by another process.":s.state==1?L"Waiting for the configured TCP port. Check the command if this takes too long.":cwd;
-  SetWindowTextW(status,tip);
+  if(s.state==4) { wchar_t failure[600]; char diagnostic[512]; if(pmd_diagnostic(selected,diagnostic,sizeof(diagnostic))) to_w(diagnostic,failure,600); else if(s.exit_code>0) swprintf(failure,600,L"Service failed (exit code %d). Check output and verify the command, folder and runtime.",s.exit_code); else wcscpy(failure,L"Launch or process inspection failed. Verify the folder, command and permissions."); SetWindowTextW(status,failure); }
+  else SetWindowTextW(status,tip);
  } else SetWindowTextW(status,L"Add your first service to get started.");
  refreshing=0;
 }
@@ -190,12 +196,13 @@ static void layout(void) {
  int nav[]={ID_NAV_SERVICES,ID_NAV_PORTS,ID_NAV_SETTINGS,ID_NAV_ABOUT};
  for(int i=0;i<4;i++) move(GetDlgItem(mainwin,nav[i]),18,116+i*48,162,40);
  move(brand,18,h-72,166,52);
+ if(portswin) move(portswin,left,108,cw,h-132);
  move(GetDlgItem(mainwin,ID_ADD),left,116,140,36);
  move(GetDlgItem(mainwin,ID_IMPORT),left+150,116,140,36);
  move(GetDlgItem(mainwin,ID_EXPORT),left+300,116,124,36);
  move(GetDlgItem(mainwin,ID_STARTALL),w-242,116,104,36);
  move(GetDlgItem(mainwin,ID_STOPALL),w-128,116,104,36);
- int lh=(h-380)/2; if(lh<140) lh=140; if(lh>270) lh=270;
+ int lh=(h-380)/2; if(lh<100) lh=100; if(lh>270) lh=270;
  move(list,left,168,cw,lh);
  int y=182+lh;
  int ids[]={ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_EDIT,ID_REMOVE};
@@ -219,6 +226,7 @@ static void layout(void) {
 
 static void show_page(int next) {
  page=next;
+ if(portswin) ShowWindow(portswin,page==1?SW_SHOW:SW_HIDE);
  int service_ids[]={ID_ADD,ID_IMPORT,ID_EDIT,ID_REMOVE,ID_EXPORT,ID_STARTALL,ID_STOPALL,ID_LIST,ID_START,ID_STOP,ID_RESTART,ID_BROWSER,ID_FOLDER,ID_OPENLOG,ID_STATUS,ID_CLEAR,ID_OUTPUT,ID_PAUSE};
  for(unsigned i=0;i<sizeof(service_ids)/sizeof(service_ids[0]);i++) ShowWindow(GetDlgItem(mainwin,service_ids[i]),page==0?SW_SHOW:SW_HIDE);
  ShowWindow(logtitle,page==0?SW_SHOW:SW_HIDE); ShowWindow(status,page==0?SW_SHOW:SW_HIDE);
@@ -285,7 +293,7 @@ static LRESULT CALLBACK EditorProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
   case IDOK: save_editor(h); break;
   case IDCANCEL: DestroyWindow(h); break;
   case E_BROWSE: pickfolder(h); break;
-  case E_TEMPLATE: if(HIWORD(wp)==CBN_SELCHANGE) { int t=(int)SendMessageW(e_template,CB_GETCURSEL,0,0); const wchar_t *cmds[]={L"",L"npm run dev",L"bun run dev",L"php artisan serve --host=127.0.0.1 --port=8000",L"php -S 127.0.0.1:8000",L"python -m http.server 8080 --bind 127.0.0.1"}; const wchar_t *ports[]={L"",L"3000",L"3000",L"8000",L"8000",L"8080"}; if(t>=0 && t<6) { SetWindowTextW(e_cmd,cmds[t]); SetWindowTextW(e_port,ports[t]); } } break;
+  case E_TEMPLATE: if(HIWORD(wp)==CBN_SELENDOK) { int t=(int)SendMessageW(e_template,CB_GETCURSEL,0,0); const wchar_t *cmds[]={L"",L"npm run dev",L"bun run dev",L"php artisan serve --host=127.0.0.1 --port=8000",L"php -S 127.0.0.1:8000",L"python -m http.server 8080 --bind 127.0.0.1"}; const wchar_t *ports[]={L"",L"3000",L"3000",L"8000",L"8000",L"8080"}; if(t>0 && t<6) { wchar_t existing[2048]; GetWindowTextW(e_cmd,existing,2048); if(existing[0] && wcscmp(existing,cmds[t]) && MessageBoxW(h,L"Replace the current command and expected port with this template? Your folder and name will be kept.",L"Apply template",MB_OKCANCEL|MB_ICONQUESTION)!=IDOK) { SendMessageW(e_template,CB_SETCURSEL,0,0); break; } SetWindowTextW(e_cmd,cmds[t]); SetWindowTextW(e_port,ports[t]); } } break;
   } return 0;
  case WM_CLOSE: DestroyWindow(h); return 0;
  case WM_DESTROY: modal_done=1; return 0;
@@ -306,7 +314,7 @@ static void edit_service(int i) {
  editor=CreateWindowExW(WS_EX_DLGMODALFRAME,L"PortmanServiceEditor",i<0?L"Add service":L"Edit service",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,r.left+px(60),r.top+px(40),px(604),px(487),mainwin,NULL,instance,NULL);
  if(!editor) { EnableWindow(mainwin,TRUE); return; }
  pm_frame(editor); ShowWindow(editor,SW_SHOW);
- MSG m; while(!modal_done && GetMessageW(&m,NULL,0,0)>0) { if(m.message==WM_KEYDOWN && m.wParam==VK_ESCAPE) DestroyWindow(editor); else if(m.message==WM_KEYDOWN && m.wParam==VK_RETURN) save_editor(editor); else if(!IsDialogMessageW(editor,&m)) { TranslateMessage(&m); DispatchMessageW(&m); } }
+ MSG m; while(!modal_done && GetMessageW(&m,NULL,0,0)>0) { if(m.message==WM_KEYDOWN && (m.wParam==VK_RETURN || m.wParam==VK_ESCAPE) && SendMessageW(e_template,CB_GETDROPPEDSTATE,0,0)) { TranslateMessage(&m); DispatchMessageW(&m); continue; } if(m.message==WM_KEYDOWN && m.wParam==VK_ESCAPE && !SendMessageW(e_template,CB_GETDROPPEDSTATE,0,0)) DestroyWindow(editor); else if(m.message==WM_KEYDOWN && m.wParam==VK_RETURN && !SendMessageW(e_template,CB_GETDROPPEDSTATE,0,0)) { HWND focus=GetFocus(); if(focus==GetDlgItem(editor,IDCANCEL)) DestroyWindow(editor); else if(focus==GetDlgItem(editor,E_BROWSE)) pickfolder(editor); else save_editor(editor); } else if(!IsDialogMessageW(editor,&m)) { TranslateMessage(&m); DispatchMessageW(&m); } }
  EnableWindow(mainwin,TRUE); SetForegroundWindow(mainwin); refresh(); if(i<0) selectrow(pmd_count()-1); refreshlog();
 }
 static void import_config(void) {
@@ -328,7 +336,6 @@ static void export_config(void) {
  MessageBoxW(mainwin,L"Configuration exported.\n\nProject files and logs are not included. Folder paths remain absolute; review paths and commands before sharing or importing on another computer.",L"Export complete",MB_OK|MB_ICONINFORMATION);
 }
 /* Read-only TCP inspector: never offers to terminate arbitrary Windows processes. */
-static HWND portswin,portlist,portstatus,portsearch;
 static pm_row *portrows;
 static int portcount=-1;
 static void render_ports(void) {
@@ -373,21 +380,32 @@ static LRESULT CALLBACK PortsProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
  } return DefWindowProcW(h,msg,wp,lp);
 }
 static void show_ports(void) {
- if(portswin) { SetForegroundWindow(portswin); return; }
- portswin=CreateWindowExW(0,L"PortmanPorts",L"Port inspector - TCP listeners",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(940),px(520),mainwin,NULL,instance,NULL); pm_frame(portswin); ShowWindow(portswin,SW_SHOW);
+ if(!portswin) portswin=CreateWindowExW(WS_EX_CONTROLPARENT,L"PortmanPorts",L"Port inspector",WS_CHILD|WS_CLIPCHILDREN,0,0,px(800),px(500),mainwin,NULL,instance,NULL);
+ if(!portswin) { errorbox(mainwin,"Could not open the Ports page."); return; }
+ show_page(1); SetFocus(portsearch);
+}
+static void start_all(void) {
+ int started=0,already=0,failed=0; wchar_t details[24000]=L"",summary[24500];
+ for(int j=0;j<pmd_count();j++) {
+  pmd_service s; pmd_get(j,&s);
+  if(s.pid) { already++; continue; }
+  if(pmd_start(j)) started++;
+  else { wchar_t name[80],reason[512],line[640]; failed++; to_w(s.name,name,80); to_w(pmd_error(),reason,512); swprintf(line,640,L"\n%s: %s",name,reason); wcscat(details,line); }
+ }
+ if(failed) { swprintf(summary,24500,L"%d launched, %d already active, %d failed.\nSuccessfully launched services remain running. Launched does not mean ready.\n%s",started,already,failed,details); MessageBoxW(mainwin,summary,L"Start all results",MB_OK|MB_ICONWARNING); }
 }
 static void do_action(int id) {
  int i=current(); pmd_service s; wchar_t w[4096]; char path[8192];
  switch(id) {
  case ID_ADD: edit_service(-1); break;
- case ID_EDIT: if(i>=0) edit_service(i); break;
+ case ID_EDIT: if(pmd_get(i,&s) && !s.pid) edit_service(i); break;
  case ID_REMOVE: if(i>=0 && MessageBoxW(mainwin,L"Remove this service from Portman?\nYour project files and logs will be kept.",L"Remove service",MB_YESNO|MB_ICONQUESTION)==IDYES && !pmd_remove(i)) backend_error(mainwin); break;
  case ID_IMPORT: import_config(); break;
  case ID_EXPORT: export_config(); break;
  case ID_START: if(!pmd_start(i)) backend_error(mainwin); break;
  case ID_STOP: pmd_stop(i); break;
  case ID_RESTART: pmd_stop(i); if(!pmd_start(i)) backend_error(mainwin); break;
- case ID_STARTALL: for(int j=0;j<pmd_count();j++) if(!pmd_start(j)) { backend_error(mainwin); break; } break;
+ case ID_STARTALL: start_all(); break;
  case ID_STOPALL: if(pmd_running() && MessageBoxW(mainwin,L"Stop all services launched by Portman?\nWindows will terminate their process trees.",L"Stop all",MB_YESNO|MB_ICONQUESTION)==IDYES) pmd_shutdown(); break;
  case ID_FOLDER: if(pmd_get(i,&s)) { to_w(s.cwd,w,4096); openpath(mainwin,w); } break;
  case ID_BROWSER: if(pmd_get(i,&s) && s.port && s.state==2) { swprintf(w,4096,L"http://127.0.0.1:%u",s.port); openpath(mainwin,w); } break;
@@ -431,13 +449,13 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
   settings_title=label(h,L"Windows preferences",0,0,500,38); SendMessageW(settings_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
   settings_copy=label(h,L"STARTUP\nOpen the control panel when you sign in. Services never start automatically.",0,0,700,70);
   about_title=label(h,L"Local development, under control.",0,0,700,38); SendMessageW(about_title,WM_SETFONT,(WPARAM)titlefont,TRUE);
-  about_copy=label(h,L"Portman 0.2.4\n\nNative Win32 interface. Zig service engine. No browser, Electron, .NET, Node.js, or administrator access required.\n\nBuilt with \u2665 by rakarmp (rezz990)",0,0,700,150);
+  about_copy=label(h,L"Portman 0.2.6\n\nNative Win32 interface. Zig service engine. No browser, Electron, .NET, Node.js, or administrator access required.\n\nBuilt with \u2665 by rakarmp (rezz990)",0,0,700,150);
   tray.cbSize=sizeof(tray); tray.hWnd=h; tray.uID=1; tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP; tray.uCallbackMessage=TRAYMSG; tray.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1)); wcscpy(tray.szTip,L"Portman - double-click to open");
   if(!Shell_NotifyIconW(NIM_ADD,&tray)) EnableWindow(GetDlgItem(h,ID_TRAY),FALSE);
   SetTimer(h,1,1500,NULL); refresh(); refreshlog(); show_page(0); return 0;
  }
  case WM_SIZE: layout(); return 0;
- case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize.x=px(960); ((MINMAXINFO*)lp)->ptMinTrackSize.y=px(780); return 0;
+ case WM_GETMINMAXINFO: ((MINMAXINFO*)lp)->ptMinTrackSize.x=px(960); ((MINMAXINFO*)lp)->ptMinTrackSize.y=px(640); return 0;
  case WM_COMMAND: do_action(LOWORD(wp)); return 0;
  case WM_TIMER: pmd_tick(); refresh(); refreshlog(); return 0;
  case WM_NOTIFY: { NMHDR *n=(NMHDR*)lp; if(n->hwndFrom==list && n->code==NM_CUSTOMDRAW) return paint_rows((NMLVCUSTOMDRAW*)lp); if(n->hwndFrom==list && n->code==LVN_ITEMCHANGED && !refreshing && current()!=selected) { selected=current(); log_paused=0; SetWindowTextW(GetDlgItem(h,ID_PAUSE),L"Pause output"); refresh(); refreshlog(); } if(n->hwndFrom==list && n->code==NM_DBLCLK && current()>=0) do_action(ID_EDIT); return 0; }
@@ -463,8 +481,12 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM wp,LPARAM lp) {
 }
 int pm_desktop_main(void) {
  instance=GetModuleHandleW(NULL);
+ HANDLE gate=pm_maintenance_enter();
+ if(!gate) { errorbox(NULL,"Portman installation or removal is in progress. Wait for it to finish, then open Portman again."); return 1; }
  single=CreateMutexW(NULL,FALSE,L"Local\\PortmanDesktop02");
- if(!single || GetLastError()==ERROR_ALREADY_EXISTS) { HWND old=FindWindowW(APPCLASS,NULL); if(old) { ShowWindow(old,SW_RESTORE); SetForegroundWindow(old); } if(single) CloseHandle(single); return 0; }
+ DWORD single_error=GetLastError();
+ pm_maintenance_leave(gate);
+ if(!single || single_error==ERROR_ALREADY_EXISTS) { HWND old=FindWindowW(APPCLASS,NULL); if(old) { ShowWindow(old,SW_RESTORE); SetForegroundWindow(old); } if(single) CloseHandle(single); return 0; }
  SetProcessDPIAware(); HDC dc=GetDC(NULL); scale=GetDeviceCaps(dc,LOGPIXELSX); ReleaseDC(NULL,dc);
  CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
  INITCOMMONCONTROLSEX ic={sizeof(ic),ICC_LISTVIEW_CLASSES|ICC_STANDARD_CLASSES}; InitCommonControlsEx(&ic);
@@ -480,7 +502,11 @@ int pm_desktop_main(void) {
  WNDCLASSEXW cls={0}; cls.cbSize=sizeof(cls); cls.hInstance=instance; cls.hCursor=LoadCursorW(NULL,IDC_ARROW); cls.hbrBackground=bgbrush; cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1)); cls.lpfnWndProc=MainProc; cls.lpszClassName=APPCLASS; RegisterClassExW(&cls);
  cls.lpfnWndProc=EditorProc; cls.lpszClassName=L"PortmanServiceEditor"; RegisterClassExW(&cls);
  cls.lpfnWndProc=PortsProc; cls.lpszClassName=L"PortmanPorts"; RegisterClassExW(&cls);
- mainwin=CreateWindowExW(WS_EX_CONTROLPARENT,APPCLASS,L"Portman 0.2.4 - Windows Control Panel",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,px(1180),px(860),NULL,NULL,instance,NULL);
+ RECT work={0,0,px(1180),px(860)}; SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0);
+ int initial_w=px(1180),initial_h=px(860);
+ if(initial_w>work.right-work.left) initial_w=work.right-work.left;
+ if(initial_h>work.bottom-work.top) initial_h=work.bottom-work.top;
+ mainwin=CreateWindowExW(WS_EX_CONTROLPARENT,APPCLASS,L"Portman 0.2.6 - Windows Control Panel",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,initial_w,initial_h,NULL,NULL,instance,NULL);
  if(!mainwin) { pmd_shutdown(); return 1; }
  pm_frame(mainwin);
  ShowWindow(mainwin,SW_SHOW); UpdateWindow(mainwin);

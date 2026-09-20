@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.6 — upgrade reliability (unreleased)
+
+- Detect existing installations and offer Update / repair with installed/package versions.
+- Show the exact operation, file paths and Windows error instead of labeling every failure as a file-in-use issue.
+- Add Retry / Cancel to blocked file operations and registration failures.
+- Probe existing files before replacement and stage each attempt in a unique folder.
+- Recover earlier replacements on handled file failures; retain backups when recovery is blocked.
+- Add Setup log, preserving the Windows error before handles are closed.
+- Add 260 portable transaction scenarios and six native Windows file-lock scenarios to CI.
+- In-app update discovery/download remains planned; this release improves manual upgrades.
+
+
+## 0.2.5 — review candidate (unreleased)
+
+- Launch failures retain a per-service explanation even after other API errors. Missing project folders are detected before launching.
+- App startup and install/uninstall file replacement share a maintenance lock.
+- Template dropdown confirmation happens after selection is committed; Escape leaves the service unchanged.
+
+- Installer uses a worker thread, keeps progress responsive and waits for Finish after success.
+- Main window initial size respects the desktop work area; minimum height is 640 logical pixels.
+- Ports now opens inside the main workspace with consistent active navigation.
+- Start all continues past individual launch failures and reports each failure.
+- Start all / Stop all reflect the current service availability.
+- Failed services display a nonzero exit code or a launch/inspection explanation.
+- Applying a template asks before replacing existing commands; Custom preserves fields.
+- Editor Enter respects Cancel and Browse; open template dropdowns keep their keyboard handling.
+- Corrected portable paths, export privacy wording, outdated publishing instructions and screenshot guidance.
+- Added explicit release acceptance gates. Native Windows acceptance remains pending.
+
+
 ## 0.2.4 — Release preparation (preview)
 
 - Added VERSION with a synchronization command and stale-label CI gate.

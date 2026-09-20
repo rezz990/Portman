@@ -20,6 +20,7 @@ int pmd_import(const char *filename);
 int pmd_export(const char *filename);
 int pmd_row_matches(const pm_row *row, const char *query);
 int pmd_start(int index);
+int pmd_diagnostic(int index,char *out,int capacity);
 void pmd_stop(int index);
 void pmd_tick(void);
 int pmd_running(void);

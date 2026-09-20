@@ -1,19 +1,30 @@
-# Testing Portman 0.2.2
+# Testing Portman
 
-Portman has automated tests and a native Windows acceptance pass. Automated tests prove the parser and service engine without needing to draw a GUI. The Windows checklist covers the parts that require a real Windows desktop: installer behavior, tray integration, display scaling, file dialogs, shortcuts, and Windows process semantics.
+Portman has automated tests and a native Windows acceptance checklist. A checklist is not evidence that the tests passed. Automated tests prove the parser and service engine without needing to draw a GUI. The Windows checklist covers the parts that require a real Windows desktop: installer behavior, tray integration, display scaling, file dialogs, shortcuts, and Windows process semantics.
 
 ## Automated commands
 
 Use Zig 0.14.1.
 
+Installer-specific tests:
+
+```bash
+python tests/test_upgrade_transaction.py
+# Windows only: actual sharing violations and Retry/rollback, in a temporary folder
+python tests/test_upgrade_windows.py
+```
+
+On Linux, `python tests/test_upgrade_windows.py --build-only` checks compilation only.
+
 ```bash
 python -m ziglang fmt --check build.zig src/main.zig src/config.zig src/desktop.zig windows/setup.zig
 python -m ziglang build test
 python -m ziglang build test-desktop
+python -m ziglang build -Doptimize=ReleaseSafe
 python tests/integration.py zig-out/bin/portman
 ```
 
-The current local validation result for 0.2.2 is **9 engine/parser tests passed and 8 CLI integration tests passed**. The Windows x64 GUI, CLI, and installer also cross-compile successfully. That compilation result does not replace the native Windows checklist below.
+Record results for each candidate in `REVIEW.md`; do not reuse earlier version results as evidence for a newer build.
 
 ## Native Windows checklist
 

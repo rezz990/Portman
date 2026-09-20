@@ -27,6 +27,10 @@ jobs:
           }
       - name: Install pinned Zig
         run: python -m pip install ziglang==0.14.1
+      - name: Installer transaction failure tests
+        run: python tests/test_upgrade_transaction.py
+      - name: Native Windows upgrade file-lock tests
+        run: python tests/test_upgrade_windows.py
       - name: Check formatting
         run: python -m ziglang fmt --check build.zig src/main.zig src/config.zig src/desktop.zig windows/setup.zig
       - name: Release tooling tests

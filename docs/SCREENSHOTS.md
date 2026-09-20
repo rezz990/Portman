@@ -30,7 +30,7 @@ Show Portman minimized to the notification area and its right-click menu with Op
 
 ### 7. Installer — `07-installer.png`
 
-Show the redesigned setup window with the charcoal hero header, `BUILT WITH ♥` / `by rakarmp (rezz990)` branding, Windows x64 badge, feature cards, per-user install path, desktop shortcut option, launch-after-install option, and the **Show installation details** control. A second capture while installing can show the green progress bar and staged status text. Do not show a real username if the path contains one.
+Show the redesigned setup window with the charcoal hero header, `BUILT WITH ♥` / `by rakarmp (rezz990)` branding, Windows x64 badge, feature cards, per-user install path, desktop shortcut option, launch-after-install option, and the **Setup log** control. A second capture while installing can show the green progress bar and staged status text. Do not show a real username if the path contains one.
 
 ### 8. Start menu / uninstall — `08-start-menu.png`
 
@@ -45,4 +45,6 @@ Show Portman in the Start menu or Windows Settings > Apps. This establishes the 
 
 ## Add images to the README
 
-After placing files in `docs/images/`, uncomment the image lines in the README. Keep the first three images near the top; move the rest below the feature explanation if the page becomes too long.
+After placing files in `docs/images/`, update the three existing README image paths to `01-main-panel.png`, `03-listening-log.png`, and `04-port-inspector.png`. Keep the first three images near the top; move the rest below the feature explanation if the page becomes too long.
+
+Capture the integrated Ports page with its active sidebar item. Also capture the partial Start all result and the Failed state with exit code 7. Do not reuse the older 0.2.2 screenshots as evidence for 0.2.6.

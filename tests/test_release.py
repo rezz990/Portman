@@ -82,6 +82,13 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Generated data'):
             verify(self.root)
 
+    def test_source_version_mismatch_with_valid_checksum(self):
+        with zipfile.ZipFile(self.root / 'Portman-0.2.4-source.zip', 'w') as z:
+            z.writestr('source/VERSION', '0.2.3')
+        self.checksums()
+        with self.assertRaisesRegex(ValueError, 'Source version'):
+            verify(self.root)
+
     def test_extra_stale_asset(self):
         (self.root / 'old-installer.exe').write_bytes(b'old')
         with self.assertRaisesRegex(ValueError, 'unexpected files'):

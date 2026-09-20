@@ -8,6 +8,7 @@ const Item = struct {
     data: c.pmd_service = std.mem.zeroes(c.pmd_service),
     child: ?*c.pm_child = null,
     started: i64 = 0,
+    failure: [512]u8 = @splat(0),
 };
 var items: [32]Item = [_]Item{.{}} ** 32;
 var count: usize = 0;
@@ -210,11 +211,35 @@ export fn pmd_import(filename: [*:0]const u8) c_int {
     count += loaded.len;
     return 1;
 }
+export fn pmd_diagnostic(index: c_int, out: [*]u8, capacity: c_int) c_int {
+    if (capacity <= 0) return 0;
+    out[0] = 0;
+    if (!valid(index)) return 0;
+    const message = str(&items[@intCast(index)].failure);
+    copy(out[0..@intCast(capacity)], message) catch return 0;
+    return @intCast(message.len);
+}
 export fn pmd_start(index: c_int) c_int {
+    const result = startService(index);
+    if (valid(index)) {
+        const it = &items[@intCast(index)];
+        if (result == 0) {
+            it.data.state = 4;
+            it.data.exit_code = -1;
+            copy(&it.failure, str(&last_error)) catch {};
+        } else {
+            @memset(&it.failure, 0);
+        }
+    }
+    return result;
+}
+fn startService(index: c_int) c_int {
     if (!valid(index)) return fail("Select a service first.");
     const i: usize = @intCast(index);
     const it = &items[i];
     if (it.child != null) return 1;
+    var project = std.fs.openDirAbsolute(str(&it.data.cwd), .{}) catch return fail("Project folder is missing or inaccessible. Edit the service and choose an existing folder.");
+    project.close();
     if (it.data.port != 0) {
         const rows = a.alloc(c.pm_row, 8192) catch |e| return err(e);
         defer a.free(rows);
@@ -240,6 +265,7 @@ export fn pmd_start(index: c_int) c_int {
     it.child = c.pm_start(@ptrCast(&it.data.command), @ptrCast(&it.data.cwd), logz.ptr);
     if (it.child == null) {
         it.data.state = 4;
+        it.data.exit_code = -1;
         return fail("Could not start service. Check folder, command, permissions and log location.");
     }
     it.started = std.time.milliTimestamp();
@@ -543,4 +569,37 @@ test "port search matches IDs and text and handles empty queries" {
         try std.testing.expectEqual(@as(c_int, 1), pmd_row_matches(&row, query.ptr));
     }
     try std.testing.expectEqual(@as(c_int, 0), pmd_row_matches(&row, "mysql"));
+}
+
+test "launch diagnostics survive unrelated errors and clear after recovery" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(dir);
+    const zdir = try a.dupeZ(u8, dir);
+    defer a.free(zdir);
+    try std.testing.expectEqual(@as(c_int, 1), pmd_init(zdir.ptr));
+    defer pmd_shutdown();
+    try tmp.dir.makeDir("project");
+    const project = try tmp.dir.realpathAlloc(a, "project");
+    defer a.free(project);
+    var s = std.mem.zeroes(c.pmd_service);
+    try copy(&s.name, "diagnostic");
+    try copy(&s.cwd, project);
+    try copy(&s.command, "echo recovered");
+    try std.testing.expectEqual(@as(c_int, 1), pmd_put(-1, &s));
+    try tmp.dir.deleteDir("project");
+    try std.testing.expectEqual(@as(c_int, 0), pmd_start(0));
+    try std.testing.expectEqual(@as(c_int, 0), pmd_running());
+    _ = pmd_get(0, &s);
+    try std.testing.expectEqual(@as(c_int, 4), s.state);
+    try std.testing.expectEqual(@as(c_int, -1), s.exit_code);
+    _ = pmd_get(-1, &s); // Another API error must not replace this service's explanation.
+    var message: [512]u8 = @splat(0);
+    try std.testing.expect(pmd_diagnostic(0, &message, message.len) > 0);
+    try std.testing.expect(std.mem.indexOf(u8, str(&message), "Project folder") != null);
+    try tmp.dir.makeDir("project");
+    try std.testing.expectEqual(@as(c_int, 1), pmd_start(0));
+    try std.testing.expectEqual(@as(c_int, 0), pmd_diagnostic(0, &message, message.len));
+    try std.testing.expectEqual(@as(u8, 0), message[0]);
 }

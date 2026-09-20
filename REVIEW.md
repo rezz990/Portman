@@ -1,37 +1,42 @@
-# Portman 0.2.4 review
+# Portman 0.2.6 — upgrade review
 
-This update prepares consistent, verifiable release packages while retaining the 0.2.3 UI and service behavior.
+## Maintainer feedback
 
-## Evidence already available
+The maintainer reported the overall 0.2.5 app was good. Upgrading an older
+installation failed with a generic “file in use” warning; a fresh install worked.
+The screenshot did not contain a Windows error code, so the original cause is
+not established. This update improves handling and evidence; it does not claim
+the original file lock or permission issue has already been reproduced.
 
-- The maintainer installed 0.2.3 and reported satisfaction with its UI.
-- 0.2.3: 9 engine/parser tests passed locally; Windows binaries cross-compiled.
-- 0.2.4: seven release-tooling regression tests cover stale versions, invalid Windows version values, preserved addresses/dependency versions, tampered assets, missing checksums, generated source data and stale assets.
-- The 0.2.4 build and fresh engine/CLI results are recorded in the delivery note.
-- New GitHub Actions definitions have not been run remotely as part of this change.
+## Changes to verify
 
-## Your Windows review
+1. Leave 0.2.5 installed. Exit it and run `Portman-Setup-0.2.6.exe`.
+2. Confirm **Update / repair**, installed version, and package version 0.2.6.
+3. Update directly, click Finish, and confirm saved services and logs remain.
+4. Run the installer again to repair the same version; this should also succeed.
+5. If blocked, capture the exact operation, filename and Windows error. Close
+   the relevant process or resolve permissions, then Retry in the same dialog.
+6. Open Setup log. Confirm the error is recorded and do not uninstall merely to
+   hide the failure. Redact personal paths before sharing the log.
 
-Record Windows version, display scaling and the exact asset filename. Leave items unchecked until tested.
+## Automated evidence and limits
 
-- [ ] Install over the stopped 0.2.3 installation; service configuration and logs remain.
-- [ ] Window title, About, CLI `--version` and Windows Apps show 0.2.4.
-- [ ] Start a service with its correct expected port; confirm Listening and browser action.
-- [ ] Stop and restart it; confirm its children and listener are cleaned up.
-- [ ] Occupy the port with another process; confirm Start refuses without terminating it.
-- [ ] Run `exit 7`; confirm Failed and useful output/exit information.
-- [ ] Pause/resume output and copy text while paused.
-- [ ] Test installer shortcut/launch options with mouse and Space.
-- [ ] Test tray restore/exit and startup preference.
-- [ ] Import/export and reopen the application; verify persistence.
-- [ ] Test default, minimum and maximized sizes and the scaling you use.
-- [ ] Run the portable archive; verify it uses the same per-user configuration.
-- [ ] Uninstall; app entries disappear while project/config/log files remain.
+- 260 transaction policy scenarios pass locally on Linux: fresh, partial and
+  existing installs, preparation/backup/publication failures, rollback failure.
+- Fresh 0.2.6 validation: 10 engine/parser, 8 Linux CLI integration and 8
+  release-tooling tests passed. Version consistency and whitespace checks passed.
+- Six native Windows adapter scenarios are provided and cross-compiled here;
+  they have NOT been executed in this Linux environment. Windows CI runs them.
+- Graphical Retry, update/repair, registration failures and same-version upgrade
+  still need native Windows acceptance. Public stable status is not asserted.
 
-## Reporting a problem
+## Recovery boundaries
 
-Send the unchecked/failed item, expected behavior, actual behavior and a screenshot or log excerpt. Confirm the new executable was launched: an already-running 0.2.3 tray instance can make testing the wrong version confusing.
+File rollback is best-effort. Backups remain if a file cannot be restored.
+Registry failure after file installation retains new files and previous backups
+and offers registration Retry. Sudden power loss/forced termination recovery is
+not automatic. See [UPDATING.md](docs/UPDATING.md).
 
-## Remaining work before stable
-
-Windows acceptance, responsive installer execution, graceful-stop policy for database use, richer per-monitor DPI handling, and consistent OS-controlled scrollbars remain outside this release-preparation patch. No claim of full Windows acceptance is made by automated packaging tests.
+The package is based on GitHub `d2d6823` plus the supplied uncommitted changes.
+Nothing has been pushed, tagged, or published. Build from a reviewed clean commit
+before publishing. See [release acceptance](docs/RELEASE-ACCEPTANCE.md).

@@ -7,13 +7,15 @@
 
 **Portman is a lightweight local development control panel for Windows.** It keeps your project services in one place so you can start, stop, inspect, and read their output without opening several terminals. It is built with Zig and a native Win32 GUI, so the installed app does not need a browser, Electron, .NET, Node.js, or Zig runtime.
 
-Portman is designed for the workflow behind projects such as Next.js, Vite, Laravel, PHP, Bun, Python, Android APIs, and local databases. It does not install those runtimes or rewrite their project configuration. You provide the command and Portman manages the process tree around it.
+Portman is designed for the workflow behind projects such as Next.js, Vite, Laravel, PHP, Bun, Python, Android APIs, and foreground development workers. It does not install those runtimes or rewrite their project configuration. You provide the command and Portman manages the process tree around it.
 
 > **UI update:** The 0.2.3 interface revision and its Windows acceptance checklist are documented in [docs/UI-0.2.3.md](docs/UI-0.2.3.md). Existing screenshots show the earlier interface.
 
-> **Current status:** `0.2.4` is a Windows GUI preview. The Windows x64 binaries compile successfully and the service engine/CLI suites pass in local validation. A GitHub Actions workflow is included for repeatable CI. Native Windows acceptance should still be run before using the preview for an important database or production-like environment.
+> **Release gate:** 0.2.6 is a review candidate, not a stable release. See [REVIEW.md](REVIEW.md) for changes and [release acceptance](docs/RELEASE-ACCEPTANCE.md) for outstanding blockers.
 
-<!-- Replace the included placeholders with real captures listed in docs/SCREENSHOTS.md. -->
+> **Current status:** `0.2.6` is a Windows GUI preview. The Windows x64 binaries compile successfully and the service engine/CLI suites pass in local validation. A GitHub Actions workflow is included for repeatable CI. Native Windows acceptance should still be run before using the preview for an important database or production-like environment.
+
+<!-- Screenshots below document an earlier build; refresh them before publishing 0.2.6. -->
 
 ![Portman control panel](docs/images/01.png)
 
@@ -55,7 +57,9 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 - Persistent Services, Ports, Settings, and About navigation with clear active and keyboard-focus states.
 - Service table with status, port, PID, uptime, and command.
 - Add, edit, remove, start, stop, restart, start all, and stop all.
-- Double-click a service to edit it.
+- Double-click a stopped service to edit it.
+- Start all attempts every stopped service and reports individual launch failures; successfully launched services remain active. It does not wait for dependency readiness.
+- Applying a template asks before replacing an existing command. Selecting Custom preserves your fields.
 - Service editor templates for custom commands, npm, Bun, Laravel/PHP, PHP's built-in server, and Python HTTP server.
 - Project folder picker and validation before saving.
 - Responsive split workspace for the service list, selected-service guidance, and a readable monospace log tail; sizing follows the system DPI at launch.
@@ -66,7 +70,7 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 - Uses Windows Job Objects so Stop can terminate the managed process tree.
 - Detects whether the expected TCP port is owned by the service tree.
 - Classifies `Stopped`, `Starting...`, `Listening`, `Running`, `Check port`, and `Failed` states.
-- Shows nonzero exit codes after a service terminates.
+- Shows nonzero exit codes after a service terminates and keeps launch-failure explanations visible in the selected-service panel.
 - Detects an existing listener before Start and leaves the foreign process untouched.
 - Stops all managed services when you choose Exit.
 
@@ -94,19 +98,23 @@ Each service has a visible status, PID, uptime, expected port, command, and outp
 
 ### Installer (recommended)
 
-1. Download `Portman-Setup-0.2.4.exe` from the GitHub Release page.
+1. Download `Portman-Setup-0.2.6.exe` from the GitHub Release page.
 2. Run it as the normal Windows user who will use Portman.
 3. Leave **Create desktop shortcut** and **Open Portman after installation** enabled if desired.
-4. Click **Install**.
+4. Click **Install**, wait for the result, then click **Finish**.
 5. Open Portman from the Start menu or desktop shortcut.
 
-The installer targets Windows 10/11 x64, installs to `%LOCALAPPDATA%\\Programs\\Portman`, and uses the current user's folders and registry. It is designed to run without an administrator password and does not add the CLI to PATH. The preview installer is unsigned, so compare the release checksum and download it from the project's official release page.
+The installer targets Windows 10/11 x64, installs to `%LOCALAPPDATA%\Programs\Portman`, and uses the current user's folders and registry. It is designed to run without an administrator password and does not add the CLI to PATH. The preview installer is unsigned, so compare the release checksum and download it from the project's official release page.
 
 Portman itself is self-contained. Commands such as `npm run dev`, `php artisan serve`, `bun run dev`, or `python -m http.server` still require Node.js, PHP, Bun, Python, or the relevant runtime to be installed separately. Restart Portman after changing PATH.
 
+### Updating an existing installation
+
+Run the new installer and choose **Update / repair**. You do not need to uninstall first. Blocked operations show the exact file and Windows error with **Retry / Cancel**; **Setup log** opens the diagnostic log. See [update and recovery instructions](docs/UPDATING.md).
+
 ### Portable mode
 
-Extract the release archive and run `portable/Portman.exe`. Portable mode does not create shortcuts or an uninstaller. It uses the same `%LOCALAPPDATA%\\Portman` data directory as the installed GUI, so services and logs remain available if you later install the application.
+Extract the release archive and run `Portman-0.2.6/Portman.exe`. Portable mode does not create shortcuts or an uninstaller. It uses the same `%LOCALAPPDATA%\Portman` data directory as the installed GUI, so services and logs remain available if you later install the application.
 
 ## First run
 
@@ -114,7 +122,7 @@ The quickest useful demo needs no web framework:
 
 1. Open **Add service**.
 2. Name it `demo-worker`.
-3. Choose an existing folder such as `C:\\Temp`.
+3. Choose an existing folder such as `C:\Temp`.
 4. Set the command to `echo Portman-jalan & ping -t 127.0.0.1 >nul`.
 5. Leave Expected port empty.
 6. Save and press **Start**.
@@ -149,7 +157,7 @@ Expected port is a check and status signal. Portman does not rewrite the command
 
 ## Configuration
 
-The GUI stores services in `%LOCALAPPDATA%\\Portman\\services.toml`. Portman also imports a strict subset of TOML:
+The GUI stores services in `%LOCALAPPDATA%\Portman\services.toml`. Portman also imports a strict subset of TOML:
 
 ```toml
 [project]
@@ -170,14 +178,15 @@ port = 8000
 
 Supported fields and validation rules are documented in [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md). Unknown fields, duplicate fields, duplicate names/ports, invalid ports, malformed strings, and unsafe Windows device names are rejected. A failed load reports a line and error without overwriting the existing file.
 
-**Export config** writes only the service definitions. It does not include logs, PIDs, runtime state, environment variables, secrets, or project files. Review absolute paths and commands before sharing an export.
+**Export config** writes only the service definitions. It does not include logs, PIDs, runtime state, the process environment, or project files. Commands are exported verbatim and may contain secrets you entered. Review absolute paths and commands before sharing an export.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     GUI[Native Win32 GUI] --> ENGINE[Zig service engine]
-    CLI[CLI] --> ENGINE
+    CLI[Zig CLI] --> CONFIG
+    CLI --> PLATFORM
     ENGINE --> CONFIG[Strict TOML config]
     ENGINE --> PLATFORM[Windows / Linux adapter]
     PLATFORM --> PROCESS[Job Object or process group]
@@ -201,12 +210,12 @@ More detail is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 The Windows CLI is named `portman-cli.exe` so it can coexist with the GUI executable `Portman.exe` on a case-insensitive filesystem:
 
 ```powershell
-.\\portman-cli.exe list
-.\\portman-cli.exe inspect 3000
-.\\portman-cli.exe watch
-.\\portman-cli.exe check dev.toml
-.\\portman-cli.exe up dev.toml
-.\\portman-cli.exe logs web dev.toml --tail 80
+.\portman-cli.exe list
+.\portman-cli.exe inspect 3000
+.\portman-cli.exe watch
+.\portman-cli.exe check dev.toml
+.\portman-cli.exe up dev.toml
+.\portman-cli.exe logs web dev.toml --tail 80
 ```
 
 `kill` and `free` require confirmation and a matching PID. Windows termination requires `--force`. The CLI reference is kept in [`docs/CLI-v0.1.md`](docs/CLI-v0.1.md); the desktop panel is the main Windows workflow.
@@ -242,14 +251,14 @@ python scripts/build_windows.py
 If Zig is installed outside Python:
 
 ```powershell
-python scripts/build_windows.py --zig C:\\tools\\zig\\zig.exe
+python scripts/build_windows.py --zig C:\tools\zig\zig.exe
 ```
 
-The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.4.exe`. It also prepares a portable Windows ZIP, a clean source ZIP, and `dist/SHA256SUMS.txt`. Release output is under `dist/`; binaries and the installer are under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
+The script verifies Zig 0.14.1, builds the GUI and CLI for `x86_64-windows-gnu`, places fresh payload files under `windows/payload`, then builds `Portman-Setup-0.2.6.exe`. It also prepares a portable Windows ZIP, a clean source ZIP, and `dist/SHA256SUMS.txt`. Release output is under `dist/`; binaries and the installer are under `dist/windows-release/bin/`. `.pdb` files are debugging symbols and are not required to run the app.
 
-Prepared files are `Portman-Setup-0.2.4.exe`, `Portman-0.2.4-windows-x64.zip`, and `Portman-0.2.4-source.zip`. The source archive excludes Git metadata, caches, compiler output, installer payload staging, and previous release output. Nothing in the build script uploads or publishes an artifact.
+Prepared files are `Portman-Setup-0.2.6.exe`, `Portman-0.2.6-windows-x64.zip`, and `Portman-0.2.6-source.zip`. The source archive excludes Git metadata, caches, compiler output, installer payload staging, and previous release output. Nothing in the build script uploads or publishes an artifact.
 
-Do not commit `.zig-cache`, `zig-out`, `.pdb`, `windows/payload`, personal runtime data, or `%LOCALAPPDATA%\\Portman` files. The repository `.gitignore` covers generated build output and payloads.
+Do not commit `.zig-cache`, `zig-out`, `.pdb`, `windows/payload`, personal runtime data, or `%LOCALAPPDATA%\Portman` files. The repository `.gitignore` covers generated build output and payloads.
 
 ## Testing
 
@@ -287,7 +296,7 @@ The next priorities are graceful stop hooks, restart policy with bounded backoff
 
 ## Screenshots
 
-The repository includes clearly marked placeholder images. Replace them with captures listed in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) and keep them under `docs/images/`. The screenshot guide explains the exact state to show and how to remove private paths, usernames, IPs, credentials, and unrelated tabs before committing images.
+The existing screenshots show an older interface. Replace them with current captures listed in [`docs/SCREENSHOTS.md`](docs/SCREENSHOTS.md) and keep them under `docs/images/`. The screenshot guide explains the exact state to show and how to remove private paths, usernames, IPs, credentials, and unrelated tabs before committing images.
 
 ## License
 

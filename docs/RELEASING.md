@@ -43,4 +43,4 @@ An existing manually created release for the same tag should be reviewed before 
 
 ## Stable designation
 
-Only remove the preview designation after recording acceptance results for the supported Windows scenarios. Unsigned distribution, forceful Job Object shutdown, system-DPI behavior and synchronous installation remain documented limitations. This workflow does not implement signing, auto-update or background installation.
+Only remove the preview designation after recording acceptance results for the supported Windows scenarios. Unsigned distribution, forceful Job Object shutdown, system-DPI behavior remain documented limitations. Installer work now runs on a worker thread but requires native acceptance. This workflow does not implement signing, auto-update or unattended installation.

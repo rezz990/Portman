@@ -45,8 +45,11 @@ def verify(directory):
                 for item in names:
                     if {'.git', '.zig-cache', 'zig-out', 'dist', 'payload', '__pycache__'} & set(pathlib.PurePosixPath(item).parts):
                         raise ValueError('Generated data in source package')
-                if not any(n.endswith('/VERSION') for n in names):
-                    raise ValueError('Source package is missing VERSION')
+                versions = [n for n in names if n.endswith('/VERSION')]
+                if len(versions) != 1:
+                    raise ValueError('Source package must contain exactly one VERSION')
+                if archive.read(versions[0]).decode('utf-8').strip() != version:
+                    raise ValueError('Source version does not match release metadata')
     print('Release files, checksums and archives verified: ' + version)
 
 
